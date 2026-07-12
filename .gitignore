@@ -1,0 +1,7 @@
+images/*
+!images/README.md
+*.img
+*.img.xz
+*.zip
+*.raw
+*.tar.gz

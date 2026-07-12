@@ -1,0 +1,43 @@
+## Maintained for Xiaomi Pad 6 (pipa) Nemomobile port ##
+
+# Kernel and boot
+linux-pipa
+pipa-dracut
+pipa-grub-config
+pipa-metapkg
+
+# Firmware
+xiaomi-pipa-firmware
+linux-firmware
+wireless-regdb
+
+# Qualcomm userspace
+qrtr
+rmtfs
+tqftpserv
+pd-mapper
+hexagonrpc
+libssc
+bootmac
+swclock-offset
+qbootctl
+
+# Audio
+alsa-ucm-conf-sm8250
+pipa-sound-conf
+pulseaudio-bluetooth
+
+# Sensors / camera
+pipa-sensors
+iio-sensor-proxy
+libcamera
+
+# GPU / display
+mesa
+
+# Networking helpers
+wpa_supplicant
+iwd
+
+# Device adaptation for Glacier / Lipstick
+nemo-device-pipa

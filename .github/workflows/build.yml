@@ -1,0 +1,70 @@
+name: Build Manjaro Nemomobile pipa image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+    paths:
+      - "profiles/**"
+      - "scripts/**"
+      - "Dockerfile"
+      - ".github/workflows/build.yml"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: nemo-pipa-image
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate profiles
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate recipe
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/validate-recipe.sh
+
+  build-image:
+    name: buildarmimg pipa + nemomobile
+    needs: validate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    env:
+      PIPA_REPO_URL: ${{ vars.PIPA_REPO_URL }}
+      NEMO_REPO_URL: ${{ vars.NEMO_REPO_URL }}
+      BRANCH: ${{ vars.MANJARO_BRANCH }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image builder container
+        run: docker build -t manjaro-nemo-pipa .
+
+      - name: Build image in CI
+        run: |
+          mkdir -p images
+          docker run --rm --privileged \
+            -e CI=1 \
+            -e OUT_DIR=/out \
+            -e PIPA_REPO_URL="${PIPA_REPO_URL:-https://thespider2.github.io/pipa-pkgs/repo/}" \
+            -e NEMO_REPO_URL="${NEMO_REPO_URL:-https://thespider2.github.io/nemo-pipa-packaging/repo/}" \
+            -e BRANCH="${BRANCH:-unstable}" \
+            -e GITHUB_SHA="$GITHUB_SHA" \
+            -v "$PWD/images:/out" \
+            -v "$PWD:/build" \
+            -w /build \
+            manjaro-nemo-pipa \
+            /build/scripts/ci-build-image.sh
+          sudo chown -R "$USER:$USER" images || true
+
+      - name: Upload image artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: manjaro-nemo-pipa-images
+          path: images/
+          retention-days: 14
+          if-no-files-found: warn

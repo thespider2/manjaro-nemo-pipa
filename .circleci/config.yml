@@ -1,0 +1,45 @@
+version: 2.1
+
+jobs:
+  build_image:
+    machine:
+      image: ubuntu-2204:current
+    resource_class: arm.large
+    working_directory: ~/project
+    steps:
+      - checkout
+      - run:
+          name: Show runner
+          command: uname -a && docker version
+      - run:
+          name: Validate profiles
+          command: chmod +x scripts/*.sh && ./scripts/validate-recipe.sh
+      - run:
+          name: Build builder image
+          no_output_timeout: 60m
+          command: docker build -t manjaro-nemo-pipa .
+      - run:
+          name: Build Nemomobile pipa image
+          no_output_timeout: 180m
+          command: |
+            mkdir -p images
+            docker run --rm --privileged \
+              -e CI=1 \
+              -e OUT_DIR=/out \
+              -e PIPA_REPO_URL="${PIPA_REPO_URL:-https://thespider2.github.io/pipa-pkgs/repo/}" \
+              -e NEMO_REPO_URL="${NEMO_REPO_URL:-https://thespider2.github.io/nemo-pipa-packaging/repo/}" \
+              -v "$PWD/images:/out" \
+              -v "$PWD:/build" \
+              -w /build \
+              manjaro-nemo-pipa \
+              /build/scripts/ci-build-image.sh
+      - run:
+          name: Summarize
+          command: ls -lah images || true
+      - store_artifacts:
+          path: images
+
+workflows:
+  build:
+    jobs:
+      - build_image

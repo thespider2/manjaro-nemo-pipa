@@ -1,11 +1,10 @@
-# Nemo session (OBS packages)
 sshd.service
 bluetooth.service
 mce.service
 dsme.service
 lightdm.service
+sensorfwd.service
 
-# Pipa Qualcomm / sensors / clock (from pipa-pkgs units)
 >pipa rmtfs.service
 >pipa tqftpserv.service
 >pipa pd-mapper.service
@@ -15,4 +14,5 @@ lightdm.service
 >pipa pipa-sensors-persist.service
 >pipa hexagonrpcd-sdsp.service
 >pipa pipa-audio-init.service
+>pipa cameras_setup.service
 >pipa nemomobile-post-install.service

@@ -304,19 +304,44 @@ done
 umount "$BOOT_MNT"
 
 echo "=== Creating esp.raw ==="
+# Match pocketblue / Mu-Silicium: 4096-byte sectors (UFS). 512-byte FATs often
+# leave Silicium stuck in MsTemp without ever loading BOOTAA64.
 truncate -s 128M "$OUTPUT_DIR/nemo_esp.raw"
-mkfs.fat -F 16 -n "$ESP_LABEL" "$OUTPUT_DIR/nemo_esp.raw"
+mkfs.fat -F 16 -S 4096 -s 4 -n "$ESP_LABEL" "$OUTPUT_DIR/nemo_esp.raw"
 mount -o loop "$OUTPUT_DIR/nemo_esp.raw" "$ESP_MNT"
-mkdir -p "$ESP_MNT/EFI/BOOT" "$ESP_MNT/EFI/nemo"
-# FAT has no ownership/xattrs — plain cp (not -a)
-cp -f "$EFI_TEMPLATE/EFI/BOOT/BOOTAA64.EFI" "$ESP_MNT/EFI/BOOT/"
-cp -f "$EFI_TEMPLATE/EFI/nemo/grubaa64.efi" "$ESP_MNT/EFI/nemo/"
-[ -f "$EFI_TEMPLATE/EFI/BOOT/FBAA64.EFI" ] && cp -f "$EFI_TEMPLATE/EFI/BOOT/FBAA64.EFI" "$ESP_MNT/EFI/BOOT/" || true
+mkdir -p "$ESP_MNT/EFI/BOOT" "$ESP_MNT/EFI/nemo" "$ESP_MNT/EFI/fedora"
 
-for shim_vendor in nemo BOOT; do
+# Pocketblue-style shim + Fedora grub (plain cp — FAT has no ownership)
+for src in \
+  "$EFI_TEMPLATE/EFI/BOOT/BOOTAA64.EFI" \
+  "$EFI_TEMPLATE/EFI/BOOT/FBAA64.EFI" \
+  "$EFI_TEMPLATE/EFI/BOOT/grubaa64.efi" \
+  "$EFI_TEMPLATE/EFI/BOOT/shimaa64.efi" \
+  "$EFI_TEMPLATE/EFI/BOOT/BOOTAA64.CSV"
+do
+  [ -f "$src" ] && cp -f "$src" "$ESP_MNT/EFI/BOOT/"
+done
+for vendor in nemo fedora; do
+  mkdir -p "$ESP_MNT/EFI/$vendor"
+  for f in grubaa64.efi shimaa64.efi mmaa64.efi BOOTAA64.CSV; do
+    [ -f "$EFI_TEMPLATE/EFI/$vendor/$f" ] && cp -f "$EFI_TEMPLATE/EFI/$vendor/$f" "$ESP_MNT/EFI/$vendor/"
+  done
+  # shim as BOOTAA64 in vendor dir too (some loaders look here)
+  [ -f "$EFI_TEMPLATE/EFI/$vendor/shimaa64.efi" ] && \
+    cp -f "$EFI_TEMPLATE/EFI/$vendor/shimaa64.efi" "$ESP_MNT/EFI/$vendor/BOOTAA64.EFI"
+done
+
+for shim_vendor in nemo fedora BOOT; do
   mkdir -p "$ESP_MNT/EFI/$shim_vendor"
   cat > "$ESP_MNT/EFI/$shim_vendor/grub.cfg" <<ESPCFG
-search --label $BOOT_LABEL --set prefix --no-floppy
+if [ -f \${config_directory}/bootuuid.cfg ]; then
+  source \${config_directory}/bootuuid.cfg
+fi
+if [ -n "\${BOOT_UUID}" ]; then
+  search --fs-uuid "\${BOOT_UUID}" --set prefix --no-floppy
+else
+  search --label $BOOT_LABEL --set prefix --no-floppy
+fi
 if [ -d (\$prefix)/grub2 ]; then
   set prefix=(\$prefix)/grub2
   configfile \$prefix/grub.cfg
@@ -326,6 +351,9 @@ else
 fi
 boot
 ESPCFG
+  cat > "$ESP_MNT/EFI/$shim_vendor/bootuuid.cfg" <<UUIDCFG
+set BOOT_UUID=""
+UUIDCFG
 done
 umount "$ESP_MNT"
 
@@ -380,6 +408,9 @@ need() {
 fastboot getvar product 2>&1 | grep pipa
 read -r -p "Proceed with flashing? [Y/n]: " CONFIRM
 case "${CONFIRM:-Y}" in y|Y|yes|YES|"") ;; *) echo "Aborted."; exit 0 ;; esac
+if [[ -f vbmeta-disabled.img || -f vbmeta-disabled.img.xz ]]; then
+  fastboot flash vbmeta_ab "$(need vbmeta-disabled.img)" || true
+fi
 fastboot flash boot_ab "$(need silicium.img)"
 fastboot flash rawdump "$(need nemo_esp.raw)"
 fastboot flash cust "$(need nemo_boot.raw)"

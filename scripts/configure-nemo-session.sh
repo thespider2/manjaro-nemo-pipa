@@ -90,13 +90,34 @@ if [ -f "$ROOTFS_DIR/usr/lib/systemd/user/lipstick.service" ]; then
     "$ROOTFS_DIR/home/${NEMO_USER}/.config/systemd/user/user-session.target.wants/lipstick.service"
 fi
 
-# Enable mce/dsme if present
-for svc in mce.service dsme.service; do
-  if [ -f "$ROOTFS_DIR/usr/lib/systemd/system/$svc" ]; then
-    ln -sfn "/usr/lib/systemd/system/$svc" \
-      "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants/$svc"
-  fi
-done
+# Enable mce/dsme if present — DISABLED by default on pipa: mce blanks
+# the panel (brightness 0) before lipstick owns DRM. Re-enable later with
+# mcetool --set-never-blank=enabled once the UI is stable.
+# for svc in mce.service dsme.service; do
+#   if [ -f "$ROOTFS_DIR/usr/lib/systemd/system/$svc" ]; then
+#     ln -sfn "/usr/lib/systemd/system/$svc" \
+#       "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants/$svc"
+#   fi
+# done
+
+# Keep panel lit until lipstick takes over
+cat > "$ROOTFS_DIR/usr/lib/systemd/system/pipa-unblank.service" <<'EOF'
+[Unit]
+Description=Force Xiaomi Pad 6 panel brightness on
+After=multi-user.target
+Before=glacier-session.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c 'for d in /sys/class/backlight/*; do echo 0 > "$d/bl_power" 2>/dev/null; echo $(($(cat "$d/max_brightness")*80/100)) > "$d/brightness" 2>/dev/null; done; for f in /sys/class/graphics/fb*/blank; do echo 0 > "$f" 2>/dev/null; done; true'
+
+[Install]
+WantedBy=graphical.target
+EOF
+mkdir -p "$ROOTFS_DIR/etc/systemd/system/graphical.target.wants"
+ln -sfn /usr/lib/systemd/system/pipa-unblank.service \
+  "$ROOTFS_DIR/etc/systemd/system/graphical.target.wants/pipa-unblank.service"
 
 # Default to graphical.target
 ln -sfn /usr/lib/systemd/system/graphical.target \
@@ -107,16 +128,17 @@ cat > "$ROOTFS_DIR/var/lib/environment/compositor/90-pipa.conf" <<'EOF'
 LIPSTICK_OPTIONS=-platform eglfs
 QT_QPA_PLATFORM=eglfs
 QT_QPA_EGLFS_INTEGRATION=eglfs_kms
+QT_QPA_EGLFS_ALWAYS_SET_MODE=1
 QT_QUICK_CONTROLS_STYLE=Nemo
 GLACIER_NATIVEORIENTATION=1
 EOF
 
-# System unit: bring up lipstick as nemo after multi-user (reliable on tablets)
+# Do not hard-depend on mce (it blanks the panel on this hardware)
 cat > "$ROOTFS_DIR/usr/lib/systemd/system/glacier-session.service" <<EOF
 [Unit]
 Description=Glacier (Lipstick) session for ${NEMO_USER}
-After=mce.service multi-user.target systemd-user-sessions.service
-Wants=mce.service
+After=multi-user.target systemd-user-sessions.service pipa-unblank.service
+Wants=pipa-unblank.service
 
 [Service]
 Type=simple
@@ -128,6 +150,7 @@ Environment=USER=${NEMO_USER}
 Environment=XDG_RUNTIME_DIR=/run/user/${NEMO_UID}
 Environment=QT_QPA_PLATFORM=eglfs
 Environment=QT_QPA_EGLFS_INTEGRATION=eglfs_kms
+Environment=QT_QPA_EGLFS_ALWAYS_SET_MODE=1
 Environment=QT_QUICK_CONTROLS_STYLE=Nemo
 Environment=GLACIER_NATIVEORIENTATION=1
 EnvironmentFile=-/usr/share/glacier-home/nemovars.conf

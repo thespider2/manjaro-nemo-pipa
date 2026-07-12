@@ -1,9 +1,10 @@
 images/*
 !images/README.md
-*.img
-*.img.xz
+images/.cache/
 *.raw
 *.zip
 *.tar.gz
 *.tar.xz
-images/.cache/
+# Ignore downloaded firmware images, but keep our bundled vbmeta
+*.img
+!assets/vbmeta-disabled.img

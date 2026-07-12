@@ -1,0 +1,367 @@
+#!/usr/bin/env bash
+# Split openSUSE NEMO rootfs + pipa-pkgs kernel into pipa flash layout
+# (same mapping as Ultramarine / EndeavourOS).
+#
+# Usage (as root):
+#   post-process-pipa.sh <nemo-rootfs.tar.xz|extracted-rootfs-dir> [output-dir]
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DATE=$(date +%Y%m%d)
+INPUT="${1:?usage: $0 <rootfs.tar.xz|rootfs-dir> [output-dir]}"
+OUTPUT_DIR="${2:-$REPO_ROOT/images/nemo-pipa-${DATE}}"
+
+ROOTFS_LABEL="nemo-pipa"
+BOOT_LABEL="boot"
+ESP_LABEL="NEMOPIPA"
+
+SILICIUM_URL="${SILICIUM_URL:-https://github.com/onesaladleaf/Mu-Silicium/releases/download/v3.5-pocketblue/Mu-pipa.img}"
+PIPA_REPO_URL="${PIPA_REPO_URL:-https://thespider2.github.io/pipa-pkgs/repo/}"
+VBMETA_DISABLED="$REPO_ROOT/assets/vbmeta-disabled.img"
+EFI_TEMPLATE="$REPO_ROOT/efi-template"
+OVERLAY_TAR="${OVERLAY_TAR:-$REPO_ROOT/images/pipa-nemo-overlay.tar.gz}"
+
+# Arch packages to inject from pipa-pkgs (kernel + critical hardware)
+PIPA_INJECT_PKGS=(
+  linux-pipa
+  xiaomi-pipa-firmware
+  pipa-dracut
+  pipa-grub-config
+  pipa-metapkg
+  alsa-ucm-conf-sm8250
+  pipa-sound-conf
+  pipa-sensors
+  qrtr
+  rmtfs
+  tqftpserv
+  pd-mapper
+  hexagonrpc
+  libssc
+  bootmac
+  swclock-offset
+  qbootctl
+  iio-sensor-proxy
+)
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Must run as root (loop mounts)" >&2
+  exit 1
+fi
+
+mkdir -p "$OUTPUT_DIR" "$REPO_ROOT/images/.cache"
+WORK=$(mktemp -d)
+ROOTFS_DIR="$WORK/rootfs"
+BOOT_MNT="$WORK/boot"
+ESP_MNT="$WORK/esp"
+PKG_CACHE="$REPO_ROOT/images/.cache/pipa-pkgs"
+mkdir -p "$ROOTFS_DIR" "$BOOT_MNT" "$ESP_MNT" "$PKG_CACHE"
+
+cleanup() {
+  umount "$ROOTFS_DIR/boot" 2>/dev/null || true
+  umount "$BOOT_MNT" 2>/dev/null || true
+  umount "$ESP_MNT" 2>/dev/null || true
+  umount "$ROOTFS_DIR/proc" 2>/dev/null || true
+  umount "$ROOTFS_DIR/sys" 2>/dev/null || true
+  umount "$ROOTFS_DIR/dev" 2>/dev/null || true
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+echo "=== Preparing NEMO rootfs ==="
+if [ -d "$INPUT" ]; then
+  rsync -aHAX "$INPUT"/ "$ROOTFS_DIR"/
+elif [[ "$INPUT" == *.tar.xz ]] || [[ "$INPUT" == *.tar.gz ]] || [[ "$INPUT" == *.tgz ]]; then
+  tar -C "$ROOTFS_DIR" -xf "$INPUT"
+else
+  echo "Unsupported input: $INPUT" >&2
+  exit 1
+fi
+
+# Apply pipa overlays if present
+if [ -f "$OVERLAY_TAR" ]; then
+  echo "=== Applying pipa overlay ==="
+  TMPO=$(mktemp -d)
+  tar -C "$TMPO" -xzf "$OVERLAY_TAR"
+  if [ -d "$TMPO/profiles/overlays/nemomobile" ]; then
+    rsync -a "$TMPO/profiles/overlays/nemomobile/" "$ROOTFS_DIR/" --exclude overlay.txt || true
+  fi
+  if [ -d "$TMPO/profiles/overlays/pipa" ]; then
+    rsync -a "$TMPO/profiles/overlays/pipa/" "$ROOTFS_DIR/" --exclude overlay.txt || true
+  fi
+  rm -rf "$TMPO"
+fi
+
+# Also copy device package sparse from sibling packaging repo if available
+DEVICE_SPARSE="${DEVICE_SPARSE:-/home/ayman/nemo-pipa-packaging/device/nemo-device-pipa/sparse}"
+if [ -d "$DEVICE_SPARSE" ]; then
+  echo "=== Applying nemo-device-pipa sparse ==="
+  rsync -a "$DEVICE_SPARSE"/ "$ROOTFS_DIR"/
+fi
+
+echo "=== Fetching/injecting pipa-pkgs (kernel + hardware) ==="
+# Resolve latest matching package filenames from repo index
+INDEX=$(curl -fsSL "$PIPA_REPO_URL")
+inject_one() {
+  local name="$1"
+  local file
+  file=$(printf '%s\n' "$INDEX" | grep -oE "href=\"${name}-[^\"]+\.pkg\.tar\.(xz|zst)\"" | sed 's/href="//;s/"$//' | sort -V | tail -n1 || true)
+  if [ -z "$file" ]; then
+    echo "WARNING: package not found in pipa-pkgs: $name"
+    return 0
+  fi
+  local dest="$PKG_CACHE/$file"
+  if [ ! -f "$dest" ]; then
+    echo "  downloading $file"
+    curl -fL --retry 3 -o "$dest" "${PIPA_REPO_URL%/}/$file"
+  fi
+  echo "  extracting $file"
+  tar -C "$ROOTFS_DIR" -xf "$dest" --exclude='.PKGINFO' --exclude='.MTREE' --exclude='.BUILDINFO' --exclude='.INSTALL' 2>/dev/null \
+    || tar -C "$ROOTFS_DIR" -xf "$dest"
+}
+
+for pkg in "${PIPA_INJECT_PKGS[@]}"; do
+  inject_one "$pkg"
+done
+
+# Remove Arch package metadata leftovers if any
+rm -f "$ROOTFS_DIR"/.PKGINFO "$ROOTFS_DIR"/.MTREE "$ROOTFS_DIR"/.BUILDINFO "$ROOTFS_DIR"/.INSTALL 2>/dev/null || true
+
+KERNEL_VER=$(find "$ROOTFS_DIR/usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | head -n1 || true)
+if [ -z "$KERNEL_VER" ]; then
+  echo "ERROR: no kernel modules after pipa-pkgs inject" >&2
+  ls -la "$ROOTFS_DIR/usr/lib/modules" >&2 || true
+  exit 1
+fi
+echo "Kernel version: $KERNEL_VER"
+
+mkdir -p "$ROOTFS_DIR/boot/dtbs/qcom" "$ROOTFS_DIR/boot/grub" "$ROOTFS_DIR/boot/grub2"
+
+# Locate kernel / dtb
+KERNEL_IMAGE=""
+for f in "$ROOTFS_DIR/boot/Image.gz" "$ROOTFS_DIR/boot/vmlinuz-$KERNEL_VER" "$ROOTFS_DIR/usr/lib/modules/$KERNEL_VER/vmlinuz"; do
+  [ -f "$f" ] && KERNEL_IMAGE="$f" && break
+done
+if [ -z "$KERNEL_IMAGE" ]; then
+  # Some Arch kernels install as /boot/vmlinuz-linux-pipa
+  for f in "$ROOTFS_DIR"/boot/vmlinuz-*; do
+    [ -f "$f" ] && KERNEL_IMAGE="$f" && break
+  done
+fi
+[ -n "$KERNEL_IMAGE" ] || { echo "ERROR: kernel image missing" >&2; ls -la "$ROOTFS_DIR/boot" >&2; exit 1; }
+
+# Ensure Image.gz on boot
+if [[ "$KERNEL_IMAGE" != *.gz ]]; then
+  gzip -c -9 "$KERNEL_IMAGE" > "$ROOTFS_DIR/boot/Image.gz"
+else
+  cp -f "$KERNEL_IMAGE" "$ROOTFS_DIR/boot/Image.gz"
+fi
+# Uncompressed Image if available
+if [ -f "$ROOTFS_DIR/boot/Image" ]; then
+  :
+elif [ -f "${KERNEL_IMAGE%.gz}" ] && [[ "$KERNEL_IMAGE" == *.gz ]]; then
+  gunzip -c "$KERNEL_IMAGE" > "$ROOTFS_DIR/boot/Image" || true
+fi
+
+# DTBs
+shopt -s nullglob
+dtb_files=("$ROOTFS_DIR"/boot/dtbs/qcom/sm8250-xiaomi-pipa*.dtb)
+if [ ${#dtb_files[@]} -eq 0 ]; then
+  dtb_files=("$ROOTFS_DIR"/usr/lib/modules/"$KERNEL_VER"/dtb/qcom/sm8250-xiaomi-pipa*.dtb)
+fi
+if [ ${#dtb_files[@]} -eq 0 ]; then
+  dtb_files=("$ROOTFS_DIR"/usr/lib/modules/"$KERNEL_VER"/devicetree/sm8250-xiaomi-pipa*.dtb)
+fi
+shopt -u nullglob
+if [ ${#dtb_files[@]} -eq 0 ]; then
+  echo "ERROR: no pipa DTB found" >&2
+  find "$ROOTFS_DIR" -name 'sm8250-xiaomi-pipa*.dtb' 2>/dev/null | head >&2 || true
+  exit 1
+fi
+mkdir -p "$ROOTFS_DIR/boot/dtbs/qcom"
+cp -f "${dtb_files[@]}" "$ROOTFS_DIR/boot/dtbs/qcom/"
+
+TARGET_KERNEL_CMDLINE="root=LABEL=$ROOTFS_LABEL rw rootwait boot=LABEL=$BOOT_LABEL console=tty0 quiet splash clk_ignore_unused pd_ignore_unused"
+printf '%s\n' "$TARGET_KERNEL_CMDLINE" > "$ROOTFS_DIR/boot/cmdline.txt"
+printf '%s\n' "$TARGET_KERNEL_CMDLINE" > "$ROOTFS_DIR/etc/cmdline" 2>/dev/null || true
+
+echo "=== Generating initramfs (dracut) ==="
+INITRAMFS_STABLE="initramfs-linux-pipa.img"
+if command -v dracut >/dev/null 2>&1 || [ -x "$ROOTFS_DIR/usr/bin/dracut" ]; then
+  mount --bind /proc "$ROOTFS_DIR/proc" 2>/dev/null || true
+  mount --bind /sys "$ROOTFS_DIR/sys" 2>/dev/null || true
+  mount --bind /dev "$ROOTFS_DIR/dev" 2>/dev/null || true
+  if chroot "$ROOTFS_DIR" /usr/bin/dracut --force --kver "$KERNEL_VER" "/boot/initramfs-$KERNEL_VER.img" 2>/dev/null \
+    || chroot "$ROOTFS_DIR" dracut --force --kver "$KERNEL_VER" "/boot/initramfs-$KERNEL_VER.img" 2>/dev/null; then
+    cp -f "$ROOTFS_DIR/boot/initramfs-$KERNEL_VER.img" "$ROOTFS_DIR/boot/$INITRAMFS_STABLE"
+  else
+    echo "WARNING: dracut failed; looking for existing initramfs"
+  fi
+  umount "$ROOTFS_DIR/proc" 2>/dev/null || true
+  umount "$ROOTFS_DIR/sys" 2>/dev/null || true
+  umount "$ROOTFS_DIR/dev" 2>/dev/null || true
+fi
+
+INITRAMFS=""
+for f in "$ROOTFS_DIR/boot/initramfs-$KERNEL_VER.img" "$ROOTFS_DIR/boot/$INITRAMFS_STABLE" "$ROOTFS_DIR/boot/initramfs.img" "$ROOTFS_DIR/boot/initrd.img"; do
+  [ -f "$f" ] && INITRAMFS="$f" && break
+done
+if [ -z "$INITRAMFS" ]; then
+  echo "WARNING: no initramfs — creating minimal placeholder (may not boot until regenerated on device)"
+  # Tiny cpio placeholder so flash artifacts exist; device needs proper initramfs later
+  (cd "$WORK" && mkdir -p empty && printf '' | cpio -o -H newc 2>/dev/null | gzip > "$ROOTFS_DIR/boot/$INITRAMFS_STABLE") || \
+    dd if=/dev/zero bs=1M count=2 of="$ROOTFS_DIR/boot/$INITRAMFS_STABLE"
+  INITRAMFS="$ROOTFS_DIR/boot/$INITRAMFS_STABLE"
+else
+  cp -f "$INITRAMFS" "$ROOTFS_DIR/boot/$INITRAMFS_STABLE"
+fi
+
+cat > "$ROOTFS_DIR/etc/fstab" <<FSTAB
+LABEL=$ROOTFS_LABEL / ext4 defaults,x-systemd.growfs 0 1
+LABEL=$BOOT_LABEL /boot ext4 defaults 0 2
+FSTAB
+
+mkdir -p "$ROOTFS_DIR/boot/grub"
+cat > "$ROOTFS_DIR/boot/grub/grub.cfg" <<GRUB
+search --no-floppy --label --set=boot $BOOT_LABEL
+set prefix=(\$boot)/grub2
+configfile (\$boot)/grub2/grub.cfg
+GRUB
+
+echo "=== Creating boot.raw ==="
+truncate -s 1024M "$OUTPUT_DIR/nemo_boot.raw"
+mkfs.ext4 -F -L "$BOOT_LABEL" -O ^64bit,^metadata_csum,^metadata_csum_seed,^orphan_file "$OUTPUT_DIR/nemo_boot.raw"
+mount -o loop "$OUTPUT_DIR/nemo_boot.raw" "$BOOT_MNT"
+
+cp -f "$ROOTFS_DIR/boot/Image.gz" "$BOOT_MNT/Image.gz"
+[ -f "$ROOTFS_DIR/boot/Image" ] && cp -f "$ROOTFS_DIR/boot/Image" "$BOOT_MNT/Image"
+cp -f "$ROOTFS_DIR/boot/$INITRAMFS_STABLE" "$BOOT_MNT/$INITRAMFS_STABLE"
+[ -f "$ROOTFS_DIR/boot/initramfs-$KERNEL_VER.img" ] && cp -f "$ROOTFS_DIR/boot/initramfs-$KERNEL_VER.img" "$BOOT_MNT/"
+mkdir -p "$BOOT_MNT/dtbs/qcom" "$BOOT_MNT/grub2"
+cp -f "$ROOTFS_DIR"/boot/dtbs/qcom/sm8250-xiaomi-pipa*.dtb "$BOOT_MNT/dtbs/qcom/"
+printf '%s\n' "$TARGET_KERNEL_CMDLINE" > "$BOOT_MNT/cmdline.txt"
+
+kernel_rel="Image"
+[ -f "$BOOT_MNT/Image" ] || kernel_rel="Image.gz"
+dtb_rels=()
+for dtb in "$BOOT_MNT"/dtbs/qcom/sm8250-xiaomi-pipa*.dtb; do
+  dtb_rels+=("dtbs/qcom/$(basename "$dtb")")
+done
+
+"$REPO_ROOT/scripts/write-pipa-grub-cfg.sh" \
+  "$BOOT_MNT/grub2/grub.cfg" "$BOOT_LABEL" "$TARGET_KERNEL_CMDLINE" \
+  "$kernel_rel" "$INITRAMFS_STABLE" "${dtb_rels[@]}"
+
+umount "$BOOT_MNT"
+
+echo "=== Creating esp.raw ==="
+truncate -s 128M "$OUTPUT_DIR/nemo_esp.raw"
+mkfs.fat -F 16 -n "$ESP_LABEL" "$OUTPUT_DIR/nemo_esp.raw"
+mount -o loop "$OUTPUT_DIR/nemo_esp.raw" "$ESP_MNT"
+mkdir -p "$ESP_MNT/EFI/BOOT" "$ESP_MNT/EFI/nemo"
+cp -a "$EFI_TEMPLATE/EFI/BOOT/BOOTAA64.EFI" "$ESP_MNT/EFI/BOOT/"
+cp -a "$EFI_TEMPLATE/EFI/nemo/grubaa64.efi" "$ESP_MNT/EFI/nemo/"
+[ -f "$EFI_TEMPLATE/EFI/BOOT/FBAA64.EFI" ] && cp -a "$EFI_TEMPLATE/EFI/BOOT/FBAA64.EFI" "$ESP_MNT/EFI/BOOT/" || true
+
+for shim_vendor in nemo BOOT; do
+  mkdir -p "$ESP_MNT/EFI/$shim_vendor"
+  cat > "$ESP_MNT/EFI/$shim_vendor/grub.cfg" <<ESPCFG
+search --label $BOOT_LABEL --set prefix --no-floppy
+if [ -d (\$prefix)/grub2 ]; then
+  set prefix=(\$prefix)/grub2
+  configfile \$prefix/grub.cfg
+else
+  set prefix=(\$prefix)/boot/grub2
+  configfile \$prefix/grub.cfg
+fi
+boot
+ESPCFG
+done
+umount "$ESP_MNT"
+
+echo "=== Creating rootfs.raw ==="
+# Clear /boot contents from rootfs image (live on cust partition)
+rm -rf "$ROOTFS_DIR/boot"/*
+mkdir -p "$ROOTFS_DIR/boot/grub"
+cat > "$ROOTFS_DIR/boot/grub/grub.cfg" <<GRUB
+search --no-floppy --label --set=boot $BOOT_LABEL
+set prefix=(\$boot)/grub2
+configfile (\$boot)/grub2/grub.cfg
+GRUB
+
+SIZE=$(du -sBM "$ROOTFS_DIR" | awk '{print $1}' | tr -d 'M')
+SIZE=$((SIZE + SIZE / 8 + 512))
+echo "Rootfs size: ${SIZE}M"
+truncate -s "${SIZE}M" "$OUTPUT_DIR/nemo_rootfs.raw"
+MKE2FS_DEVICE_PHYS_SECTSIZE=4096 MKE2FS_DEVICE_SECTSIZE=4096 \
+  mkfs.ext4 -L "$ROOTFS_LABEL" "$OUTPUT_DIR/nemo_rootfs.raw"
+ROOT_MNT=$(mktemp -d)
+mount -o loop "$OUTPUT_DIR/nemo_rootfs.raw" "$ROOT_MNT"
+rsync -aHAX --exclude '/tmp/*' "$ROOTFS_DIR"/ "$ROOT_MNT"/
+umount "$ROOT_MNT"
+rmdir "$ROOT_MNT"
+
+echo "=== Fetching Mu-Silicium ==="
+curl -fL --retry 3 -o "$OUTPUT_DIR/silicium.img" "$SILICIUM_URL"
+cp -f "$VBMETA_DISABLED" "$OUTPUT_DIR/vbmeta-disabled.img"
+
+echo "=== Writing flash scripts ==="
+cat > "$OUTPUT_DIR/flash.sh" <<'FLASH'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "### Nemomobile (openSUSE) - Xiaomi Pad 6 single-boot flasher"
+echo "### Flashes rootfs to userdata."
+fastboot getvar product 2>&1 | grep pipa
+read -r -p "Proceed with flashing? [Y/n]: " CONFIRM
+case "${CONFIRM:-Y}" in y|Y|yes|YES|"") ;; *) echo "Aborted."; exit 0 ;; esac
+fastboot flash boot_ab silicium.img
+fastboot flash rawdump nemo_esp.raw
+fastboot flash cust nemo_boot.raw
+fastboot flash userdata nemo_rootfs.raw
+fastboot reboot
+FLASH
+chmod +x "$OUTPUT_DIR/flash.sh"
+
+cat > "$OUTPUT_DIR/flash-multiboot.sh" <<'MFLASH'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "### Nemomobile (openSUSE) - Xiaomi Pad 6 multiboot flasher"
+ROOTFS_PART="${1:-linux}"
+BOOT_SLOT="${2:-boot_ab}"
+fastboot getvar product 2>&1 | grep pipa
+echo "  Mu-Silicium -> $BOOT_SLOT"
+echo "  ESP         -> rawdump"
+echo "  boot        -> cust"
+echo "  rootfs      -> $ROOTFS_PART"
+read -r -p "Proceed? [Y/n]: " CONFIRM
+case "${CONFIRM:-Y}" in y|Y|yes|YES|"") ;; *) echo "Aborted."; exit 0 ;; esac
+fastboot flash "$BOOT_SLOT" silicium.img
+fastboot flash rawdump nemo_esp.raw
+fastboot flash cust nemo_boot.raw
+fastboot flash "$ROOTFS_PART" nemo_rootfs.raw
+fastboot reboot
+MFLASH
+chmod +x "$OUTPUT_DIR/flash-multiboot.sh"
+
+cat > "$OUTPUT_DIR/BUILDINFO.txt" <<INFO
+Nemomobile openSUSE Pipa Image
+==============================
+Build date:     $DATE
+Kernel:         $KERNEL_VER
+Rootfs label:   $ROOTFS_LABEL
+Boot label:     $BOOT_LABEL
+ESP label:      $ESP_LABEL
+Silicium URL:   $SILICIUM_URL
+Pipa pkgs:      $PIPA_REPO_URL
+Flash:
+  silicium.img   -> boot_ab
+  nemo_esp.raw   -> rawdump
+  nemo_boot.raw  -> cust
+  nemo_rootfs.raw-> userdata (or linux for multiboot)
+INFO
+
+(cd "$OUTPUT_DIR" && sha256sum -- *.raw *.img *.sh BUILDINFO.txt > SHA256SUMS 2>/dev/null || true)
+(cd "$OUTPUT_DIR" && zip -r "$REPO_ROOT/images/nemo-pipa-${DATE}.zip" .)
+
+echo "=== Done ==="
+echo "Output: $OUTPUT_DIR"
+ls -lah "$OUTPUT_DIR"

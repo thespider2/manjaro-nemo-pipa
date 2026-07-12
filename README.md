@@ -1,43 +1,34 @@
-# opensuse-nemo-pipa (repo: manjaro-nemo-pipa)
+# Nemomobile for Xiaomi Pad 6 (openSUSE + pipa flash layout)
 
-Xiaomi Pad 6 port following **current upstream Nemomobile**: **openSUSE Tumbleweed + OBS**.
+Follows **current upstream** Nemomobile on **openSUSE Tumbleweed / OBS**, then post-processes into the **same flash layout as Ultramarine OS and EndeavourOS**.
 
-> Repo name is historical; content is openSUSE, not Manjaro.
+## Flash partition mapping
 
-## Upstream sources
+| Image file | Target partition | Contents |
+|---|---|---|
+| `silicium.img` | `boot_ab` | Mu-Silicium UEFI |
+| `nemo_esp.raw` | `rawdump` | ESP (FAT, GRUB EFI) |
+| `nemo_boot.raw` | `cust` | `/boot` (kernel, initramfs, DTB, GRUB) |
+| `nemo_rootfs.raw` | `userdata` / `linux` | Root filesystem (Nemo + pipa-pkgs) |
 
-| What | Where |
-|------|--------|
-| Nemo RPMs | [devel:NemoMobile](https://build.opensuse.org/project/show/devel:NemoMobile) → `https://download.opensuse.org/repositories/devel:/NemoMobile/openSUSE_Tumbleweed/` |
-| Official images | [OBS images](https://download.opensuse.org/repositories/devel:/NemoMobile/images/) — e.g. `openSUSE-Tumbleweed-ARM-NEMO-efi.aarch64*.raw.xz` |
-| Install docs | https://nemomobile.net/installation/ |
-| Pipa device RPM | [nemo-pipa-packaging](https://github.com/thespider2/nemo-pipa-packaging) (CI builds **only** this) |
-
-Default logins (upstream): `root` / `linux` or `nemo` / `1234`.
-
-## Pipa hardware packages (required)
-
-Full device list: [`profiles/devices/pipa`](profiles/devices/pipa) — kernel, firmware, QRTR/rmtfs, audio, sensors, camera, etc.
-
-Consume from **pipa-pkgs** (Arch pacman repo today):
-
-```
-[pipa-pkgs]
-SigLevel = Optional TrustAll
-Server = https://thespider2.github.io/pipa-pkgs/repo/$arch
+```bash
+./flash.sh                  # single-boot → userdata
+./flash-multiboot.sh linux  # multiboot → linux partition
 ```
 
-Do not omit these when composing a bootable pipa image; OBS Nemo alone has no Xiaomi Pad 6 support.
+## What CI builds
 
-## What this repo does
+1. Download OBS `openSUSE-Tumbleweed-ARM-NEMO.aarch64-rootfs*.tar.xz`
+2. Inject **pipa-pkgs** (`linux-pipa`, firmware, sensors, audio, …)
+3. Apply `nemo-device-pipa` overlays (sensorfw / Pulse / camera)
+4. Emit `nemo_{esp,boot,rootfs}.raw` + Mu-Silicium + flash scripts
 
-CI (aarch64) downloads the latest **NEMO-efi aarch64** image from OBS, injects `nemo-device-pipa` config overlays, and publishes an artifact. It does **not** rebuild lipstick/mce/glacier.
+## Sources
 
-Pipa kernel/firmware are still device-specific (not in OBS yet). The pipeline stages a Nemo rootfs/image ready for pipa boot integration (Mu-Silicium / `kernel-pipa` RPM work).
+| | |
+|--|--|
+| Nemo UI | [devel:NemoMobile](https://build.opensuse.org/project/show/devel:NemoMobile) |
+| Hardware | [pipa-pkgs](https://thespider2.github.io/pipa-pkgs/repo/) |
+| Device glue | [nemo-pipa-packaging](https://github.com/thespider2/nemo-pipa-packaging) |
 
-## CI
-
-- GitHub Actions: `.github/workflows/build.yml` (`ubuntu-24.04-arm`)
-- CircleCI: `.circleci/config.yml` (`arm.large`)
-
-Local: `make validate` only (no image build on laptops).
+Default logins (upstream Nemo): `root`/`linux` or `nemo`/`1234`.

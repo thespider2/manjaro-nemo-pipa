@@ -2,6 +2,8 @@ images/*
 !images/README.md
 *.img
 *.img.xz
-*.zip
 *.raw
+*.zip
 *.tar.gz
+*.tar.xz
+images/.cache/

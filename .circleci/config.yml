@@ -8,9 +8,16 @@ jobs:
       - checkout
       - run: chmod +x scripts/*.sh && ./scripts/validate-recipe.sh
       - run:
-          name: Fetch OBS NEMO image
-          no_output_timeout: 120m
-          command: mkdir -p images && ./scripts/ci-build-image.sh
+          name: Install tools
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y e2fsprogs dosfstools rsync wget curl zip cpio gzip xz-utils
+      - run:
+          name: Build flashables
+          no_output_timeout: 180m
+          command: |
+            mkdir -p images
+            sudo ./scripts/ci-build-image.sh
       - store_artifacts:
           path: images
 workflows:

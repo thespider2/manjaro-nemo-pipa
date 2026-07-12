@@ -126,40 +126,75 @@ done
 # Remove Arch package metadata leftovers if any
 rm -f "$ROOTFS_DIR"/.PKGINFO "$ROOTFS_DIR"/.MTREE "$ROOTFS_DIR"/.BUILDINFO "$ROOTFS_DIR"/.INSTALL 2>/dev/null || true
 
-KERNEL_VER=$(find "$ROOTFS_DIR/usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | head -n1 || true)
+# Prefer linux-pipa modules; drop stock openSUSE kernels so find/dracut don't pick them
+mapfile -t _mod_dirs < <(find "$ROOTFS_DIR/usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort -V || true)
+KERNEL_VER=""
+for d in "${_mod_dirs[@]}"; do
+  case "$d" in
+    *pipa*|*PIPA*) KERNEL_VER="$d"; break ;;
+  esac
+done
+if [ -z "$KERNEL_VER" ]; then
+  for d in "${_mod_dirs[@]}"; do
+    # Arch linux-pipa often uses uname like 6.x.y-N-pipa or similar; skip *-default / *-vanilla
+    case "$d" in
+      *-default|*-vanilla|*-slowroll*) continue ;;
+      *) KERNEL_VER="$d"; break ;;
+    esac
+  done
+fi
 if [ -z "$KERNEL_VER" ]; then
   echo "ERROR: no kernel modules after pipa-pkgs inject" >&2
   ls -la "$ROOTFS_DIR/usr/lib/modules" >&2 || true
   exit 1
 fi
+for d in "${_mod_dirs[@]}"; do
+  if [ "$d" != "$KERNEL_VER" ]; then
+    echo "Removing unused stock kernel modules: $d"
+    rm -rf "$ROOTFS_DIR/usr/lib/modules/$d"
+  fi
+done
 echo "Kernel version: $KERNEL_VER"
 
 mkdir -p "$ROOTFS_DIR/boot/dtbs/qcom" "$ROOTFS_DIR/boot/grub" "$ROOTFS_DIR/boot/grub2"
 
-# Locate kernel / dtb
+# Locate kernel / dtb — prefer pipa/vmlinuz over any pre-existing Image.gz from NEMO rootfs
 KERNEL_IMAGE=""
-for f in "$ROOTFS_DIR/boot/Image.gz" "$ROOTFS_DIR/boot/vmlinuz-$KERNEL_VER" "$ROOTFS_DIR/usr/lib/modules/$KERNEL_VER/vmlinuz"; do
+for f in \
+  "$ROOTFS_DIR/boot/vmlinuz-linux-pipa" \
+  "$ROOTFS_DIR/boot/vmlinuz-$KERNEL_VER" \
+  "$ROOTFS_DIR/usr/lib/modules/$KERNEL_VER/vmlinuz" \
+  "$ROOTFS_DIR/boot/Image.gz" \
+  "$ROOTFS_DIR/boot/Image"
+do
   [ -f "$f" ] && KERNEL_IMAGE="$f" && break
 done
 if [ -z "$KERNEL_IMAGE" ]; then
-  # Some Arch kernels install as /boot/vmlinuz-linux-pipa
   for f in "$ROOTFS_DIR"/boot/vmlinuz-*; do
     [ -f "$f" ] && KERNEL_IMAGE="$f" && break
   done
 fi
 [ -n "$KERNEL_IMAGE" ] || { echo "ERROR: kernel image missing" >&2; ls -la "$ROOTFS_DIR/boot" >&2; exit 1; }
+echo "Kernel image: $KERNEL_IMAGE"
 
-# Ensure Image.gz on boot
-if [[ "$KERNEL_IMAGE" != *.gz ]]; then
-  gzip -c -9 "$KERNEL_IMAGE" > "$ROOTFS_DIR/boot/Image.gz"
+# Ensure Image.gz on boot (skip no-op same-file copy; GNU cp -f still errors on same path)
+DEST_GZ="$ROOTFS_DIR/boot/Image.gz"
+if [[ "$KERNEL_IMAGE" == *.gz ]]; then
+  if [ "$KERNEL_IMAGE" -ef "$DEST_GZ" ] || [ "$KERNEL_IMAGE" = "$DEST_GZ" ]; then
+    :
+  else
+    cp -f "$KERNEL_IMAGE" "$DEST_GZ"
+  fi
 else
-  cp -f "$KERNEL_IMAGE" "$ROOTFS_DIR/boot/Image.gz"
+  gzip -c -9 "$KERNEL_IMAGE" > "$DEST_GZ"
 fi
-# Uncompressed Image if available
-if [ -f "$ROOTFS_DIR/boot/Image" ]; then
-  :
-elif [ -f "${KERNEL_IMAGE%.gz}" ] && [[ "$KERNEL_IMAGE" == *.gz ]]; then
-  gunzip -c "$KERNEL_IMAGE" > "$ROOTFS_DIR/boot/Image" || true
+# Uncompressed Image if available / derivable
+if [ ! -f "$ROOTFS_DIR/boot/Image" ]; then
+  if [[ "$KERNEL_IMAGE" == *.gz ]]; then
+    gunzip -c "$KERNEL_IMAGE" > "$ROOTFS_DIR/boot/Image" || true
+  elif [ ! "$KERNEL_IMAGE" -ef "$ROOTFS_DIR/boot/Image" ]; then
+    cp -f "$KERNEL_IMAGE" "$ROOTFS_DIR/boot/Image"
+  fi
 fi
 
 # DTBs

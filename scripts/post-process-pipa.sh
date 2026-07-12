@@ -308,9 +308,10 @@ truncate -s 128M "$OUTPUT_DIR/nemo_esp.raw"
 mkfs.fat -F 16 -n "$ESP_LABEL" "$OUTPUT_DIR/nemo_esp.raw"
 mount -o loop "$OUTPUT_DIR/nemo_esp.raw" "$ESP_MNT"
 mkdir -p "$ESP_MNT/EFI/BOOT" "$ESP_MNT/EFI/nemo"
-cp -a "$EFI_TEMPLATE/EFI/BOOT/BOOTAA64.EFI" "$ESP_MNT/EFI/BOOT/"
-cp -a "$EFI_TEMPLATE/EFI/nemo/grubaa64.efi" "$ESP_MNT/EFI/nemo/"
-[ -f "$EFI_TEMPLATE/EFI/BOOT/FBAA64.EFI" ] && cp -a "$EFI_TEMPLATE/EFI/BOOT/FBAA64.EFI" "$ESP_MNT/EFI/BOOT/" || true
+# FAT has no ownership/xattrs — plain cp (not -a)
+cp -f "$EFI_TEMPLATE/EFI/BOOT/BOOTAA64.EFI" "$ESP_MNT/EFI/BOOT/"
+cp -f "$EFI_TEMPLATE/EFI/nemo/grubaa64.efi" "$ESP_MNT/EFI/nemo/"
+[ -f "$EFI_TEMPLATE/EFI/BOOT/FBAA64.EFI" ] && cp -f "$EFI_TEMPLATE/EFI/BOOT/FBAA64.EFI" "$ESP_MNT/EFI/BOOT/" || true
 
 for shim_vendor in nemo BOOT; do
   mkdir -p "$ESP_MNT/EFI/$shim_vendor"

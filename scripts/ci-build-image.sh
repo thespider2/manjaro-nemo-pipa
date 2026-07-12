@@ -1,67 +1,54 @@
 #!/usr/bin/env bash
-# CI entrypoint: install profiles and run buildarmimg when available.
+# CI: fetch upstream openSUSE NEMO aarch64 image and apply pipa overlays.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-$ROOT/images}"
-DEVICE="${DEVICE:-pipa}"
-EDITION="${EDITION:-nemomobile}"
-BRANCH="${BRANCH:-unstable}"
-VERSION="${VERSION:-ci-$(date +%Y%m%d%H%M)-${GITHUB_SHA:-local}}"
-VERSION="${VERSION:0:32}"
-
+OBS_IMAGES="${OBS_IMAGES:-https://download.opensuse.org/repositories/devel:/NemoMobile/images/}"
+PATTERN="${NEMO_IMAGE_PATTERN:-openSUSE-Tumbleweed-ARM-NEMO-efi.aarch64}"
 mkdir -p "$OUT_DIR"
 chmod +x "$ROOT/scripts"/*.sh
 
 echo "==> Host: $(uname -a)"
-echo "==> Staging profiles"
-DEST="$OUT_DIR/profile-staging" "$ROOT/scripts/install-profiles.sh"
-"$ROOT/scripts/validate-recipe.sh" || true
+"$ROOT/scripts/validate-recipe.sh"
 
-# Also install into manjaro-arm-tools path when present
-if [[ -d /usr/share/manjaro-arm-tools ]] || command -v buildarmimg >/dev/null 2>&1; then
-  DEST=/usr/share/manjaro-arm-tools/profiles/arm-profiles "$ROOT/scripts/install-profiles.sh" || \
-    sudo DEST=/usr/share/manjaro-arm-tools/profiles/arm-profiles "$ROOT/scripts/install-profiles.sh" || true
+echo "==> Resolving latest OBS image matching $PATTERN"
+INDEX=$(curl -fsSL "$OBS_IMAGES")
+# Pick newest raw.xz for efi aarch64
+CANDIDATE=$(printf '%s\n' "$INDEX" | grep -oE "href=\"${PATTERN}[^\"]+\\.raw\\.xz\"" | sed 's/href="//;s/"$//' | sed 's|^\./||' | sort -u | tail -n1)
+if [[ -z "$CANDIDATE" ]]; then
+  echo "ERROR: no image matching $PATTERN under $OBS_IMAGES"
+  exit 1
 fi
+URL="${OBS_IMAGES%/}/$CANDIDATE"
+echo "==> Downloading $URL"
+curl -fL --retry 3 -o "$OUT_DIR/$CANDIDATE" "$URL"
 
-# Write extra pacman repos for the image build
-cat > "$OUT_DIR/extra-repos.conf" << REPOEOF
-[pipa-pkgs]
-SigLevel = Optional TrustAll
-Server = ${PIPA_REPO_URL:-https://thespider2.github.io/pipa-pkgs/repo/}\$arch
-
-[nemo-pipa]
-SigLevel = Optional TrustAll
-Server = ${NEMO_REPO_URL:-https://thespider2.github.io/nemo-pipa-packaging/repo/}\$arch
-REPOEOF
-
-if [[ "${NEMO_UPSTREAM_REPO:-}" != "none" ]]; then
-  cat >> "$OUT_DIR/extra-repos.conf" << REPOEOF
-
-[nemomobile]
-SigLevel = Optional TrustAll
-Server = ${NEMO_UPSTREAM_REPO:-https://img.nemomobile.net/manjaro/}\$repo/\$arch
-REPOEOF
-fi
-
-if ! command -v buildarmimg >/dev/null 2>&1; then
-  echo "WARNING: buildarmimg not installed in this container yet."
-  echo "Packaging recipe + profile staging as CI artifact; install manjaro-arm-tools for full images."
-  tar -C "$ROOT" -czf "$OUT_DIR/manjaro-nemo-pipa-profiles-${VERSION}.tar.gz" profiles scripts README.md Makefile
-  # Non-zero would fail CI before packages exist; succeed with staged recipe while stack is bootstrapping
-  if [[ "${CI_REQUIRE_IMAGE:-0}" == "1" ]]; then
-    exit 1
+# Optional sha256
+SHA=$(printf '%s\n' "$INDEX" | grep -oE "href=\"${CANDIDATE}\\.sha256\"" | head -1 | sed 's/href="//;s/"$//' | sed 's|^\./||' || true)
+if [[ -n "$SHA" ]]; then
+  curl -fL -o "$OUT_DIR/$CANDIDATE.sha256" "${OBS_IMAGES%/}/$SHA" || true
+  if [[ -f "$OUT_DIR/$CANDIDATE.sha256" ]]; then
+    (cd "$OUT_DIR" && sha256sum -c "$CANDIDATE.sha256" || true)
   fi
-  echo "CI_REQUIRE_IMAGE!=1 — uploaded profile recipe instead of .img"
-  exit 0
 fi
 
-echo "==> buildarmimg -d $DEVICE -e $EDITION -v $VERSION -b $BRANCH"
-buildarmimg -d "$DEVICE" -e "$EDITION" -v "$VERSION" -b "$BRANCH"
+echo "==> Staging pipa overlay tarball (applied on-device or in later rootfs step)"
+tar -C "$ROOT" -czf "$OUT_DIR/pipa-nemo-overlay.tar.gz" \
+  profiles/overlays/pipa \
+  profiles/overlays/nemomobile \
+  profiles/devices/pipa
 
-DEFAULT_IMG_DIR="/var/cache/manjaro-arm-tools/img"
-if [[ -d "$DEFAULT_IMG_DIR" ]]; then
-  cp -a "$DEFAULT_IMG_DIR"/*.img* "$OUT_DIR"/ 2>/dev/null || true
-  cp -a "$DEFAULT_IMG_DIR"/*.zip "$OUT_DIR"/ 2>/dev/null || true
-fi
+cat > "$OUT_DIR/BUILDINFO.txt" << INFO
+upstream_image=$CANDIDATE
+upstream_url=$URL
+obs_project=devel:NemoMobile
+device=pipa
+nemo_device_rpm=https://thespider2.github.io/nemo-pipa-packaging/repo/
+note=Flash/boot pipa kernel separately; this artifact is upstream NEMO + pipa overlay bundle.
+git_sha=${GITHUB_SHA:-unknown}
+INFO
+
+# Keep compressed upstream image + overlay as CI artifacts (do not recompress further)
 ls -lah "$OUT_DIR"
+echo "==> Done (openSUSE upstream image fetched; no Manjaro rebuild)"

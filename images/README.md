@@ -1,1 +1,1 @@
-Images are produced by CI only. See .github/workflows/build.yml
+CI artifacts land here: upstream openSUSE NEMO image + pipa overlay tarball.

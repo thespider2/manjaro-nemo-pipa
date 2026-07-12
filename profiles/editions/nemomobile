@@ -1,61 +1,14 @@
-## Maintained for Xiaomi Pad 6 (pipa) — based on nemomobile-ux/arm-profiles ##
+## openSUSE / OBS consumer — do not rebuild these from source in this project ##
+## Install from: https://download.opensuse.org/repositories/devel:/NemoMobile/openSUSE_Tumbleweed/
 
-# Device specific packages
 >pipa nemo-device-pipa
->pinephone nemo-device-pinephone
->pinephonepro nemo-device-pinephone
->pinetab nemo-device-pinetab
->rpi4-cutiepi nemo-device-cutiepi
 
-bootsplash-theme-nemo
-
-# Multimedia packages
-gst-libav
-gst-plugins-bad
-gst-plugins-base
-gst-plugins-ugly
-# ffmpeg-pp may be Manjaro-specific; use ffmpeg if unavailable
-ffmpeg
-
-# Additional packages
-accountsservice
-lightdm
-mce
-mce-plugin-libhybris-nondroid
-dsme
-swi-prolog7
-ohm
-ohm-plugin-ruleengine
-
-# Main glacier packages
 lipstick-glacier-home
-glacier-alarmclock
-glacier-alarm-listener
-glacier-calc
-glacier-calendar
-glacier-camera
-glacier-contacts
-glacier-filemuncher
-glacier-gallery
-glacier-messages
-glacier-music
 glacier-wayland-session
-glacier-browser
-glacier-testtool
-glacier-weather
-fingerterm
-
-# Other
-xdg-user-dirs
-mesa
-alsa-utils
-pulseaudio-bluetooth
-wget
-vim
 maliit-nemo-keyboard
-
+mce
+dsme
+lightdm
+accountsservice
+fingerterm
 nemo-theme-glacier
-nemo-theme-openmoko
-
-gst-plugins-good
-mc

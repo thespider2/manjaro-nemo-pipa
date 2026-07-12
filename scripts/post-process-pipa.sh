@@ -411,7 +411,11 @@ Flash:
 INFO
 
 (cd "$OUTPUT_DIR" && sha256sum -- *.raw *.img *.sh BUILDINFO.txt > SHA256SUMS 2>/dev/null || true)
-(cd "$OUTPUT_DIR" && zip -r "$REPO_ROOT/images/nemo-pipa-${DATE}.zip" .)
+
+# Optional zip for local builds only (CI uploads the flash files directly — avoid ~2× artifact size)
+if [[ "${MAKE_FLASH_ZIP:-0}" == "1" ]]; then
+  (cd "$OUTPUT_DIR" && zip -r "$REPO_ROOT/images/nemo-pipa-${DATE}.zip" .)
+fi
 
 echo "=== Done ==="
 echo "Output: $OUTPUT_DIR"

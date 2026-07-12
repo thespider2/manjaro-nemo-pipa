@@ -53,6 +53,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nemo-pipa-flashable
+          # Flashables only — do not also upload a zip of the same files (~2× size).
           path: |
             images/nemo_esp.raw
             images/nemo_boot.raw
@@ -63,10 +64,7 @@ jobs:
             images/flash-multiboot.sh
             images/BUILDINFO.txt
             images/SHA256SUMS
-            images/*.zip
-            images/pipa-*.txt
-            images/pipa-nemo-overlay.tar.gz
             images/upstream-rootfs.url
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
           compression-level: 0

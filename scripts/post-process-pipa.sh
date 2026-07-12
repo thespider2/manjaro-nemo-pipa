@@ -197,7 +197,21 @@ if [ ! -f "$ROOTFS_DIR/boot/Image" ]; then
   fi
 fi
 
-# DTBs
+# Copy into dest dir, skipping sources that already live there (GNU cp errors on same file)
+cp_into() {
+  local dest="$1"; shift
+  mkdir -p "$dest"
+  local src
+  for src in "$@"; do
+    [ -e "$src" ] || continue
+    if [ "$src" -ef "$dest/$(basename "$src")" ] || [ "$src" = "$dest/$(basename "$src")" ]; then
+      continue
+    fi
+    cp -f "$src" "$dest/"
+  done
+}
+
+# DTBs — linux-pipa already ships them under boot/dtbs/qcom/
 shopt -s nullglob
 dtb_files=("$ROOTFS_DIR"/boot/dtbs/qcom/sm8250-xiaomi-pipa*.dtb)
 if [ ${#dtb_files[@]} -eq 0 ]; then
@@ -212,8 +226,8 @@ if [ ${#dtb_files[@]} -eq 0 ]; then
   find "$ROOTFS_DIR" -name 'sm8250-xiaomi-pipa*.dtb' 2>/dev/null | head >&2 || true
   exit 1
 fi
-mkdir -p "$ROOTFS_DIR/boot/dtbs/qcom"
-cp -f "${dtb_files[@]}" "$ROOTFS_DIR/boot/dtbs/qcom/"
+cp_into "$ROOTFS_DIR/boot/dtbs/qcom" "${dtb_files[@]}"
+echo "DTBs: ${dtb_files[*]}"
 
 TARGET_KERNEL_CMDLINE="root=LABEL=$ROOTFS_LABEL rw rootwait boot=LABEL=$BOOT_LABEL console=tty0 quiet splash clk_ignore_unused pd_ignore_unused"
 printf '%s\n' "$TARGET_KERNEL_CMDLINE" > "$ROOTFS_DIR/boot/cmdline.txt"
@@ -246,7 +260,8 @@ if [ -z "$INITRAMFS" ]; then
   (cd "$WORK" && mkdir -p empty && printf '' | cpio -o -H newc 2>/dev/null | gzip > "$ROOTFS_DIR/boot/$INITRAMFS_STABLE") || \
     dd if=/dev/zero bs=1M count=2 of="$ROOTFS_DIR/boot/$INITRAMFS_STABLE"
   INITRAMFS="$ROOTFS_DIR/boot/$INITRAMFS_STABLE"
-else
+elif [ ! "$INITRAMFS" -ef "$ROOTFS_DIR/boot/$INITRAMFS_STABLE" ] \
+  && [ "$INITRAMFS" != "$ROOTFS_DIR/boot/$INITRAMFS_STABLE" ]; then
   cp -f "$INITRAMFS" "$ROOTFS_DIR/boot/$INITRAMFS_STABLE"
 fi
 

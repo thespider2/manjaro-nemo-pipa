@@ -4,12 +4,14 @@ Follows **current upstream** Nemomobile on **openSUSE Tumbleweed / OBS**, then p
 
 ## Flash partition mapping
 
+CI artifacts are **xz-compressed**. `flash.sh` decompresses automatically.
+
 | Image file | Target partition | Contents |
 |---|---|---|
-| `silicium.img` | `boot_ab` | Mu-Silicium UEFI |
-| `nemo_esp.raw` | `rawdump` | ESP (FAT, GRUB EFI) |
-| `nemo_boot.raw` | `cust` | `/boot` (kernel, initramfs, DTB, GRUB) |
-| `nemo_rootfs.raw` | `userdata` / `linux` | Root filesystem (Nemo + pipa-pkgs) |
+| `silicium.img.xz` | `boot_ab` | Mu-Silicium UEFI |
+| `nemo_esp.raw.xz` | `rawdump` | ESP (FAT, GRUB EFI) |
+| `nemo_boot.raw.xz` | `cust` | `/boot` (kernel, initramfs, DTB, GRUB) |
+| `nemo_rootfs.raw.xz` | `userdata` / `linux` | Root filesystem (Nemo + pipa-pkgs) |
 
 ```bash
 ./flash.sh                  # single-boot → userdata
@@ -21,7 +23,7 @@ Follows **current upstream** Nemomobile on **openSUSE Tumbleweed / OBS**, then p
 1. Download OBS `openSUSE-Tumbleweed-ARM-NEMO.aarch64-rootfs*.tar.xz`
 2. Inject **pipa-pkgs** (`linux-pipa`, firmware, sensors, audio, …)
 3. Apply `nemo-device-pipa` overlays (sensorfw / Pulse / camera)
-4. Emit `nemo_{esp,boot,rootfs}.raw` + Mu-Silicium + flash scripts
+4. Emit `nemo_{esp,boot,rootfs}.raw.xz` + Mu-Silicium + flash scripts
 
 ## Sources
 

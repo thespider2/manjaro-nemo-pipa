@@ -359,15 +359,31 @@ echo "=== Writing flash scripts ==="
 cat > "$OUTPUT_DIR/flash.sh" <<'FLASH'
 #!/usr/bin/env bash
 set -euo pipefail
+cd "$(dirname "$0")"
 echo "### Nemomobile (openSUSE) - Xiaomi Pad 6 single-boot flasher"
 echo "### Flashes rootfs to userdata."
+
+need() {
+  local f="$1"
+  if [[ -f "$f" ]]; then
+    echo "$f"
+  elif [[ -f "$f.xz" ]]; then
+    echo "==> Decompressing $f.xz" >&2
+    xz -dkf "$f.xz"
+    echo "$f"
+  else
+    echo "ERROR: missing $f or $f.xz" >&2
+    exit 1
+  fi
+}
+
 fastboot getvar product 2>&1 | grep pipa
 read -r -p "Proceed with flashing? [Y/n]: " CONFIRM
 case "${CONFIRM:-Y}" in y|Y|yes|YES|"") ;; *) echo "Aborted."; exit 0 ;; esac
-fastboot flash boot_ab silicium.img
-fastboot flash rawdump nemo_esp.raw
-fastboot flash cust nemo_boot.raw
-fastboot flash userdata nemo_rootfs.raw
+fastboot flash boot_ab "$(need silicium.img)"
+fastboot flash rawdump "$(need nemo_esp.raw)"
+fastboot flash cust "$(need nemo_boot.raw)"
+fastboot flash userdata "$(need nemo_rootfs.raw)"
 fastboot reboot
 FLASH
 chmod +x "$OUTPUT_DIR/flash.sh"
@@ -375,9 +391,25 @@ chmod +x "$OUTPUT_DIR/flash.sh"
 cat > "$OUTPUT_DIR/flash-multiboot.sh" <<'MFLASH'
 #!/usr/bin/env bash
 set -euo pipefail
+cd "$(dirname "$0")"
 echo "### Nemomobile (openSUSE) - Xiaomi Pad 6 multiboot flasher"
 ROOTFS_PART="${1:-linux}"
 BOOT_SLOT="${2:-boot_ab}"
+
+need() {
+  local f="$1"
+  if [[ -f "$f" ]]; then
+    echo "$f"
+  elif [[ -f "$f.xz" ]]; then
+    echo "==> Decompressing $f.xz" >&2
+    xz -dkf "$f.xz"
+    echo "$f"
+  else
+    echo "ERROR: missing $f or $f.xz" >&2
+    exit 1
+  fi
+}
+
 fastboot getvar product 2>&1 | grep pipa
 echo "  Mu-Silicium -> $BOOT_SLOT"
 echo "  ESP         -> rawdump"
@@ -385,10 +417,10 @@ echo "  boot        -> cust"
 echo "  rootfs      -> $ROOTFS_PART"
 read -r -p "Proceed? [Y/n]: " CONFIRM
 case "${CONFIRM:-Y}" in y|Y|yes|YES|"") ;; *) echo "Aborted."; exit 0 ;; esac
-fastboot flash "$BOOT_SLOT" silicium.img
-fastboot flash rawdump nemo_esp.raw
-fastboot flash cust nemo_boot.raw
-fastboot flash "$ROOTFS_PART" nemo_rootfs.raw
+fastboot flash "$BOOT_SLOT" "$(need silicium.img)"
+fastboot flash rawdump "$(need nemo_esp.raw)"
+fastboot flash cust "$(need nemo_boot.raw)"
+fastboot flash "$ROOTFS_PART" "$(need nemo_rootfs.raw)"
 fastboot reboot
 MFLASH
 chmod +x "$OUTPUT_DIR/flash-multiboot.sh"
@@ -403,16 +435,25 @@ Boot label:     $BOOT_LABEL
 ESP label:      $ESP_LABEL
 Silicium URL:   $SILICIUM_URL
 Pipa pkgs:      $PIPA_REPO_URL
-Flash:
-  silicium.img   -> boot_ab
-  nemo_esp.raw   -> rawdump
-  nemo_boot.raw  -> cust
-  nemo_rootfs.raw-> userdata (or linux for multiboot)
+Flash (decompress .xz first, or use flash.sh):
+  silicium.img(.xz)    -> boot_ab
+  nemo_esp.raw(.xz)    -> rawdump
+  nemo_boot.raw(.xz)   -> cust
+  nemo_rootfs.raw(.xz) -> userdata (or linux for multiboot)
 INFO
 
-(cd "$OUTPUT_DIR" && sha256sum -- *.raw *.img *.sh BUILDINFO.txt > SHA256SUMS 2>/dev/null || true)
+echo "=== Compressing flashables with xz ==="
+XZ_OPTS=(-T0 -9)
+for f in nemo_esp.raw nemo_boot.raw nemo_rootfs.raw silicium.img vbmeta-disabled.img; do
+  if [[ -f "$OUTPUT_DIR/$f" ]]; then
+    echo "  xz ${XZ_OPTS[*]} $f"
+    xz "${XZ_OPTS[@]}" -f "$OUTPUT_DIR/$f"
+  fi
+done
 
-# Optional zip for local builds only (CI uploads the flash files directly — avoid ~2× artifact size)
+(cd "$OUTPUT_DIR" && sha256sum -- *.xz *.sh BUILDINFO.txt > SHA256SUMS 2>/dev/null || true)
+
+# Optional zip for local builds only (CI uploads xz flash files directly)
 if [[ "${MAKE_FLASH_ZIP:-0}" == "1" ]]; then
   (cd "$OUTPUT_DIR" && zip -r "$REPO_ROOT/images/nemo-pipa-${DATE}.zip" .)
 fi

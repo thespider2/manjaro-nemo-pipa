@@ -55,11 +55,11 @@ jobs:
           name: nemo-pipa-flashable
           # Flashables only — do not also upload a zip of the same files (~2× size).
           path: |
-            images/nemo_esp.raw
-            images/nemo_boot.raw
-            images/nemo_rootfs.raw
-            images/silicium.img
-            images/vbmeta-disabled.img
+            images/nemo_esp.raw.xz
+            images/nemo_boot.raw.xz
+            images/nemo_rootfs.raw.xz
+            images/silicium.img.xz
+            images/vbmeta-disabled.img.xz
             images/flash.sh
             images/flash-multiboot.sh
             images/BUILDINFO.txt

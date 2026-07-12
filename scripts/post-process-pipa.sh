@@ -126,6 +126,9 @@ done
 # Remove Arch package metadata leftovers if any
 rm -f "$ROOTFS_DIR"/.PKGINFO "$ROOTFS_DIR"/.MTREE "$ROOTFS_DIR"/.BUILDINFO "$ROOTFS_DIR"/.INSTALL 2>/dev/null || true
 
+# OBS rootfs has lipstick but no regular user / session enablement — fix that
+ROOTFS_DIR="$ROOTFS_DIR" "$REPO_ROOT/scripts/configure-nemo-session.sh"
+
 # Prefer linux-pipa modules; drop stock openSUSE kernels so find/dracut don't pick them
 mapfile -t _mod_dirs < <(find "$ROOTFS_DIR/usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort -V || true)
 KERNEL_VER=""

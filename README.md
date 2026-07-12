@@ -15,6 +15,20 @@ Xiaomi Pad 6 port following **current upstream Nemomobile**: **openSUSE Tumblewe
 
 Default logins (upstream): `root` / `linux` or `nemo` / `1234`.
 
+## Pipa hardware packages (required)
+
+Full device list: [`profiles/devices/pipa`](profiles/devices/pipa) — kernel, firmware, QRTR/rmtfs, audio, sensors, camera, etc.
+
+Consume from **pipa-pkgs** (Arch pacman repo today):
+
+```
+[pipa-pkgs]
+SigLevel = Optional TrustAll
+Server = https://thespider2.github.io/pipa-pkgs/repo/$arch
+```
+
+Do not omit these when composing a bootable pipa image; OBS Nemo alone has no Xiaomi Pad 6 support.
+
 ## What this repo does
 
 CI (aarch64) downloads the latest **NEMO-efi aarch64** image from OBS, injects `nemo-device-pipa` config overlays, and publishes an artifact. It does **not** rebuild lipstick/mce/glacier.

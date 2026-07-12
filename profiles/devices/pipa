@@ -1,14 +1,56 @@
-## Xiaomi Pad 6 (pipa) — openSUSE / OBS Nemomobile consumer ##
-##
-## Nemo UI RPMs come from devel:NemoMobile (do not list them here for rebuild).
-## This list is the pipa hardware + device adaptation overlay.
+## Xiaomi Pad 6 (pipa) — hardware from pipa-pkgs + nemo-device-pipa ##
+## Nemo UI stack: OBS devel:NemoMobile (not listed here).
+## Hardware packages: https://thespider2.github.io/pipa-pkgs/repo/
 
-# Device adaptation (built by nemo-pipa-packaging CI as RPM)
+# Kernel and boot
+linux-pipa
+pipa-dracut
+pipa-grub-config
+pipa-kernel-flasher-hook
+pipa-metapkg
+qbootctl
+
+# Firmware
+xiaomi-pipa-firmware
+linux-firmware
+wireless-regdb
+
+# Qualcomm userspace / modem helpers
+qrtr
+rmtfs
+tqftpserv
+pd-mapper
+hexagonrpc
+libssc
+bootmac
+swclock-offset
+ath10k-shutdown
+make-dynpart-mappings
+msm-modem-uim-selection
+q6voiced
+qca-swiss-army-knife
+usb-network
+
+# Audio
+alsa-ucm-conf-sm8250
+pipa-sound-conf
+pulseaudio-bluetooth
+
+# Sensors / camera
+pipa-sensors
+iio-sensor-proxy
+libcamera
+
+# Bluetooth
+bluez
+bluez-git
+
+# GPU / display
+mesa
+
+# Networking
+wpa_supplicant
+iwd
+
+# Glacier / Lipstick device adaptation (nemo-pipa-packaging)
 nemo-device-pipa
-
-# Pipa hardware (openSUSE RPMs TBD — currently Arch/Ultramarine in pipa-pkgs)
-# linux-pipa
-# xiaomi-pipa-firmware
-# pipa-sound-conf
-# pipa-sensors
-# qrtr rmtfs tqftpserv pd-mapper hexagonrpc libssc bootmac

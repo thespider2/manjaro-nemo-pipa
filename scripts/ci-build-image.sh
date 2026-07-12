@@ -56,14 +56,21 @@ tar -C "$ROOT" -czf "$OUT_DIR/pipa-nemo-overlay.tar.gz" \
   profiles/overlays/nemomobile \
   profiles/devices/pipa
 
+# Stage package lists for image composition
+cp -a "$ROOT/profiles/devices/pipa" "$OUT_DIR/pipa-packages.txt"
+cp -a "$ROOT/profiles/services/nemomobile" "$OUT_DIR/pipa-services.txt"
+
 cat > "$OUT_DIR/BUILDINFO.txt" << INFO
 upstream_image=$CANDIDATE
 upstream_url=$URL
 obs_project=devel:NemoMobile
+obs_repo=https://download.opensuse.org/repositories/devel:/NemoMobile/openSUSE_Tumbleweed/
+pipa_pkgs_repo=https://thespider2.github.io/pipa-pkgs/repo/
+nemo_device_rpm=https://thespider2.github.io/nemo-pipa-packaging/repo/
 device=pipa
 download_image=$DOWNLOAD_IMAGE
-nemo_device_rpm=https://thespider2.github.io/nemo-pipa-packaging/repo/
-note=Flash/boot pipa kernel separately; this artifact is upstream NEMO + pipa overlay bundle.
+pipa_package_list=pipa-packages.txt
+note=Install ALL packages from profiles/devices/pipa via pipa-pkgs (+ nemo-device-pipa). Nemo UI from OBS.
 git_sha=${GITHUB_SHA:-unknown}
 INFO
 

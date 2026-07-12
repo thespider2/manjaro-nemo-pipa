@@ -1,8 +1,18 @@
-# Services expected on openSUSE NEMO (enable after zypper install from OBS)
+# Nemo session (OBS packages)
 sshd.service
 bluetooth.service
 mce.service
 dsme.service
 lightdm.service
 
+# Pipa Qualcomm / sensors / clock (from pipa-pkgs units)
+>pipa rmtfs.service
+>pipa tqftpserv.service
+>pipa pd-mapper.service
+>pipa qrtr-ns.service
+>pipa bootmac-bluetooth.service
+>pipa swclock-offset-boot.service
+>pipa pipa-sensors-persist.service
+>pipa hexagonrpcd-sdsp.service
+>pipa pipa-audio-init.service
 >pipa nemomobile-post-install.service

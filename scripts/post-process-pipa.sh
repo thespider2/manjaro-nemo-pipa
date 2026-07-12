@@ -448,6 +448,9 @@ echo "  boot        -> cust"
 echo "  rootfs      -> $ROOTFS_PART"
 read -r -p "Proceed? [Y/n]: " CONFIRM
 case "${CONFIRM:-Y}" in y|Y|yes|YES|"") ;; *) echo "Aborted."; exit 0 ;; esac
+if [[ -f vbmeta-disabled.img || -f vbmeta-disabled.img.xz ]]; then
+  fastboot flash vbmeta_ab "$(need vbmeta-disabled.img)" || true
+fi
 fastboot flash "$BOOT_SLOT" "$(need silicium.img)"
 fastboot flash rawdump "$(need nemo_esp.raw)"
 fastboot flash cust "$(need nemo_boot.raw)"

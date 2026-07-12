@@ -1,39 +1,56 @@
 #!/usr/bin/env bash
-# CI: fetch upstream openSUSE NEMO aarch64 image and apply pipa overlays.
+# CI: resolve upstream openSUSE NEMO aarch64 image from OBS and stage pipa overlays.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-$ROOT/images}"
 OBS_IMAGES="${OBS_IMAGES:-https://download.opensuse.org/repositories/devel:/NemoMobile/images/}"
 PATTERN="${NEMO_IMAGE_PATTERN:-openSUSE-Tumbleweed-ARM-NEMO-efi.aarch64}"
+# Set DOWNLOAD_IMAGE=0 to only resolve URL + ship overlays (saves ~1.3GiB CI bandwidth)
+DOWNLOAD_IMAGE="${DOWNLOAD_IMAGE:-1}"
 mkdir -p "$OUT_DIR"
 chmod +x "$ROOT/scripts"/*.sh
 
 echo "==> Host: $(uname -a)"
 "$ROOT/scripts/validate-recipe.sh"
 
-echo "==> Resolving latest OBS image matching $PATTERN"
-INDEX=$(curl -fsSL "$OBS_IMAGES")
-# Pick newest raw.xz for efi aarch64
-CANDIDATE=$(printf '%s\n' "$INDEX" | grep -oE "href=\"${PATTERN}[^\"]+\\.raw\\.xz\"" | sed 's/href="//;s/"$//' | sed 's|^\./||' | sort -u | tail -n1)
-if [[ -z "$CANDIDATE" ]]; then
-  echo "ERROR: no image matching $PATTERN under $OBS_IMAGES"
-  exit 1
-fi
+echo "==> Resolving latest OBS image matching ${PATTERN}*.raw.xz"
+JSON_URL="${OBS_IMAGES%/}/?jsontable"
+CANDIDATE=$(
+  python3 - "$JSON_URL" "$PATTERN" <<'PY'
+import json, sys, urllib.request
+url, pat = sys.argv[1], sys.argv[2]
+with urllib.request.urlopen(url, timeout=60) as r:
+    data = json.load(r)
+names = [
+    e["name"]
+    for e in data.get("data", [])
+    if e.get("name", "").startswith(pat) and e["name"].endswith(".raw.xz")
+]
+if not names:
+    sys.stderr.write(f"ERROR: no {pat}*.raw.xz in {url}\n")
+    sys.exit(1)
+# Build number sorts after date prefix for current OBS naming
+print(sorted(names)[-1])
+PY
+)
+
 URL="${OBS_IMAGES%/}/$CANDIDATE"
-echo "==> Downloading $URL"
-curl -fL --retry 3 -o "$OUT_DIR/$CANDIDATE" "$URL"
+echo "==> Selected $URL"
+printf '%s\n' "$URL" > "$OUT_DIR/upstream-image.url"
 
-# Optional sha256
-SHA=$(printf '%s\n' "$INDEX" | grep -oE "href=\"${CANDIDATE}\\.sha256\"" | head -1 | sed 's/href="//;s/"$//' | sed 's|^\./||' || true)
-if [[ -n "$SHA" ]]; then
-  curl -fL -o "$OUT_DIR/$CANDIDATE.sha256" "${OBS_IMAGES%/}/$SHA" || true
-  if [[ -f "$OUT_DIR/$CANDIDATE.sha256" ]]; then
-    (cd "$OUT_DIR" && sha256sum -c "$CANDIDATE.sha256" || true)
+if [[ "$DOWNLOAD_IMAGE" == "1" ]]; then
+  echo "==> Downloading image (set DOWNLOAD_IMAGE=0 to skip)"
+  curl -fL --retry 3 -o "$OUT_DIR/$CANDIDATE" "$URL"
+  curl -fL -o "$OUT_DIR/${CANDIDATE}.sha256" "${URL}.sha256" || true
+  if [[ -f "$OUT_DIR/${CANDIDATE}.sha256" ]]; then
+    (cd "$OUT_DIR" && sha256sum -c "${CANDIDATE}.sha256") || true
   fi
+else
+  echo "==> Skipping image download (DOWNLOAD_IMAGE=$DOWNLOAD_IMAGE)"
 fi
 
-echo "==> Staging pipa overlay tarball (applied on-device or in later rootfs step)"
+echo "==> Staging pipa overlay tarball"
 tar -C "$ROOT" -czf "$OUT_DIR/pipa-nemo-overlay.tar.gz" \
   profiles/overlays/pipa \
   profiles/overlays/nemomobile \
@@ -44,11 +61,11 @@ upstream_image=$CANDIDATE
 upstream_url=$URL
 obs_project=devel:NemoMobile
 device=pipa
+download_image=$DOWNLOAD_IMAGE
 nemo_device_rpm=https://thespider2.github.io/nemo-pipa-packaging/repo/
 note=Flash/boot pipa kernel separately; this artifact is upstream NEMO + pipa overlay bundle.
 git_sha=${GITHUB_SHA:-unknown}
 INFO
 
-# Keep compressed upstream image + overlay as CI artifacts (do not recompress further)
 ls -lah "$OUT_DIR"
-echo "==> Done (openSUSE upstream image fetched; no Manjaro rebuild)"
+echo "==> Done"

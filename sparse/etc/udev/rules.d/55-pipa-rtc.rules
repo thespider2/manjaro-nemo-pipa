@@ -1,0 +1,3 @@
+# pipa: rtc0 (PMIC) returns RTC_RD_TIME I/O error; prefer rtc1
+KERNEL=="rtc1", SYMLINK+="rtc", OPTIONS+="link_priority=10"
+KERNEL=="rtc0", OPTIONS+="link_priority=-100"

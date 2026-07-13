@@ -34,6 +34,8 @@ usb-network
 # Audio
 alsa-ucm-conf-sm8250
 pipa-sound-conf
+pulseaudio
+pulseaudio-utils
 pulseaudio-bluetooth
 
 # Sensors / camera
@@ -51,6 +53,13 @@ mesa
 # Networking
 wpa_supplicant
 iwd
+connman-client
+
+# libssc (Arch pipa-pkgs) needs these on openSUSE rootfs
+libqmi-glib5
+libqrtr-glib0
+libprotobuf-c1
+libmbim-glib4
 
 # Glacier / Lipstick device adaptation (nemo-pipa-packaging)
 nemo-device-pipa

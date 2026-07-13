@@ -41,6 +41,9 @@ PIPA_INJECT_PKGS=(
   swclock-offset
   qbootctl
   iio-sensor-proxy
+  libcamera
+  libcamera-ipa
+  libcamera-tools
 )
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -126,8 +129,15 @@ done
 # Remove Arch package metadata leftovers if any
 rm -f "$ROOTFS_DIR"/.PKGINFO "$ROOTFS_DIR"/.MTREE "$ROOTFS_DIR"/.BUILDINFO "$ROOTFS_DIR"/.INSTALL 2>/dev/null || true
 
+# Full Glacier apps + PulseAudio/openSUSE deps (PinePhone pattern equivalent)
+if [[ "${INJECT_FULL_PACKAGES:-1}" == "1" ]]; then
+  ROOTFS_DIR="$ROOTFS_DIR" PKG_CACHE="$REPO_ROOT/images/.cache/obs-rpms" \
+    "$REPO_ROOT/scripts/inject-full-packages.sh"
+fi
+
 # OBS rootfs has lipstick but no regular user / session enablement — fix that
 ROOTFS_DIR="$ROOTFS_DIR" "$REPO_ROOT/scripts/configure-nemo-session.sh"
+ROOTFS_DIR="$ROOTFS_DIR" "$REPO_ROOT/scripts/configure-pipa-hardware.sh"
 
 # Prefer linux-pipa modules; drop stock openSUSE kernels so find/dracut don't pick them
 mapfile -t _mod_dirs < <(find "$ROOTFS_DIR/usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort -V || true)

@@ -5,10 +5,26 @@
 
 lipstick-glacier-home
 glacier-wayland-session
+nemo-glacier-system-config
 maliit-nemo-keyboard
+maliit-framework-qt6
 mce
 dsme
 lightdm
 accountsservice
 fingerterm
 nemo-theme-glacier
+
+# Glacier system apps
+glacier-settings
+glacier-settings-developermode
+glacier-alarmclock
+glacier-calc
+glacier-filemuncher
+glacier-gallery
+glacier-gallery-qmlplugin
+mapplauncherd
+mapplauncherd-qt6
+nemo-qml-plugin-alarms-qt6
+nemo-qml-plugin-contacts-qt6
+qtcontacts-sqlite-qt6

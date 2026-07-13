@@ -13,6 +13,8 @@ sensorfwd.service
 >pipa swclock-offset-boot.service
 >pipa pipa-sensors-persist.service
 >pipa hexagonrpcd-sdsp.service
+>pipa hexagonrpcd-adsp-rootpd.service
 >pipa pipa-audio-init.service
 >pipa cameras_setup.service
 >pipa nemomobile-post-install.service
+>pipa systemd-timesyncd.service

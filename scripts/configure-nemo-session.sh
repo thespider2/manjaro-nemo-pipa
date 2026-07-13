@@ -128,39 +128,46 @@ cat > "$ROOTFS_DIR/var/lib/environment/compositor/90-pipa.conf" <<'EOF'
 LIPSTICK_OPTIONS=-platform eglfs
 QT_QPA_PLATFORM=eglfs
 QT_QPA_EGLFS_INTEGRATION=eglfs_kms
+QT_QPA_EGLFS_KMS_CONFIG=/etc/eglfs-config.json
 QT_QPA_EGLFS_ALWAYS_SET_MODE=1
+QT_QPA_EGLFS_PHYSICAL_WIDTH=147
+QT_QPA_EGLFS_PHYSICAL_HEIGHT=235
+QT_SCALE_FACTOR=1.75
 QT_QUICK_CONTROLS_STYLE=Nemo
 GLACIER_NATIVEORIENTATION=1
 EOF
 
-# Do not hard-depend on mce (it blanks the panel on this hardware)
+# Match upstream NEMO JeOS (PinePhone): Lipstick runs as a *user* service under
+# user-session.target. Do NOT start a second system lipstick — that fights for DRM
+# and can panic / reboot-loop on pipa.
+mkdir -p \
+  "$ROOTFS_DIR/usr/lib/systemd/user" \
+  "$ROOTFS_DIR/home/${NEMO_USER}/.config/systemd/user/default.target.wants" \
+  "$ROOTFS_DIR/home/${NEMO_USER}/.config/systemd/user/user-session.target.wants"
+if [ -f "$ROOTFS_DIR/usr/lib/systemd/user/user-session.target" ]; then
+  ln -sfn /usr/lib/systemd/user/user-session.target \
+    "$ROOTFS_DIR/home/${NEMO_USER}/.config/systemd/user/default.target"
+fi
+if [ -f "$ROOTFS_DIR/usr/lib/systemd/user/lipstick.service" ]; then
+  ln -sfn /usr/lib/systemd/user/lipstick.service \
+    "$ROOTFS_DIR/home/${NEMO_USER}/.config/systemd/user/default.target.wants/lipstick.service"
+  ln -sfn /usr/lib/systemd/user/lipstick.service \
+    "$ROOTFS_DIR/home/${NEMO_USER}/.config/systemd/user/user-session.target.wants/lipstick.service"
+fi
+chown -R "${NEMO_UID}:${NEMO_GID}" "$ROOTFS_DIR/home/${NEMO_USER}/.config"
+
+# Thin system unit: unblank + ensure user@UID (lipstick comes from user session)
 cat > "$ROOTFS_DIR/usr/lib/systemd/system/glacier-session.service" <<EOF
 [Unit]
-Description=Glacier (Lipstick) session for ${NEMO_USER}
+Description=Ensure Glacier user session for ${NEMO_USER} (lipstick via user@.service)
 After=multi-user.target systemd-user-sessions.service pipa-unblank.service
-Wants=pipa-unblank.service
+Wants=pipa-unblank.service user@${NEMO_UID}.service
+Requires=user@${NEMO_UID}.service
 
 [Service]
-Type=simple
-User=${NEMO_USER}
-PAMName=login
-WorkingDirectory=/home/${NEMO_USER}
-Environment=HOME=/home/${NEMO_USER}
-Environment=USER=${NEMO_USER}
-Environment=XDG_RUNTIME_DIR=/run/user/${NEMO_UID}
-Environment=QT_QPA_PLATFORM=eglfs
-Environment=QT_QPA_EGLFS_INTEGRATION=eglfs_kms
-Environment=QT_QPA_EGLFS_ALWAYS_SET_MODE=1
-Environment=QT_QUICK_CONTROLS_STYLE=Nemo
-Environment=GLACIER_NATIVEORIENTATION=1
-EnvironmentFile=-/usr/share/glacier-home/nemovars.conf
-EnvironmentFile=-/var/lib/environment/compositor/*.conf
-ExecStartPre=/bin/mkdir -p /run/user/${NEMO_UID}
-ExecStartPre=/bin/chown ${NEMO_USER}:${NEMO_USER} /run/user/${NEMO_UID}
-ExecStartPre=/bin/chmod 700 /run/user/${NEMO_UID}
-ExecStart=/usr/bin/lipstick -platform eglfs
-Restart=on-failure
-RestartSec=2
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
 
 [Install]
 WantedBy=graphical.target
@@ -168,6 +175,143 @@ EOF
 
 ln -sfn /usr/lib/systemd/system/glacier-session.service \
   "$ROOTFS_DIR/etc/systemd/system/graphical.target.wants/glacier-session.service"
+
+# DSME on pipa: RTC ioctl errors + process watchdogs can reboot-loop the tablet.
+# Upstream PinePhone enables dsme; on pipa keep mce but mask dsme unless explicitly wanted.
+mkdir -p "$ROOTFS_DIR/etc/systemd/system"
+ln -sfn /dev/null "$ROOTFS_DIR/etc/systemd/system/dsme.service"
+rm -f "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants/dsme.service"
+
+# USB RNDIS for SSH-from-laptop bring-up
+if [ -f "${REPO_ROOT:-}/scripts/usb-rndis-gadget.sh" ] || [ -f "$(dirname "$0")/usb-rndis-gadget.sh" ]; then
+  _usb_src="$(dirname "$0")/usb-rndis-gadget.sh"
+  install -Dm755 "$_usb_src" "$ROOTFS_DIR/usr/bin/usb-rndis-gadget.sh"
+  install -Dm644 "$(dirname "$0")/../sparse/usr/lib/systemd/system/usb-rndis.service" \
+    "$ROOTFS_DIR/usr/lib/systemd/system/usb-rndis.service" 2>/dev/null \
+    || cat > "$ROOTFS_DIR/usr/lib/systemd/system/usb-rndis.service" <<'USBEOF'
+[Unit]
+Description=USB RNDIS gadget (SSH over USB)
+DefaultDependencies=no
+After=local-fs.target systemd-modules-load.service
+Before=connman.service network-pre.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=20
+ExecStart=/usr/bin/usb-rndis-gadget.sh
+SuccessExitStatus=0 1
+[Install]
+WantedBy=multi-user.target
+USBEOF
+  mkdir -p "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants"
+  ln -sfn /usr/lib/systemd/system/usb-rndis.service \
+    "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants/usb-rndis.service"
+  mkdir -p "$ROOTFS_DIR/etc/modules-load.d"
+  printf 'libcomposite\nusb_f_rndis\n' > "$ROOTFS_DIR/etc/modules-load.d/usb-gadget.conf"
+fi
+
+# Mask connman-wait-online + firewalld (connman itself needed for Glacier UI)
+for svc in connman-wait-online.service firewalld.service; do
+  ln -sfn /dev/null "$ROOTFS_DIR/etc/systemd/system/${svc}"
+done
+rm -f "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants/firewalld.service"
+
+# openSUSE ifcfg can still trigger wicked/ifup on eth0 at boot
+if [ -f "$ROOTFS_DIR/etc/sysconfig/network/ifcfg-eth0" ]; then
+  sed -i "s/^STARTMODE=.*/STARTMODE='off'/" "$ROOTFS_DIR/etc/sysconfig/network/ifcfg-eth0" \
+    || echo "STARTMODE='off'" >> "$ROOTFS_DIR/etc/sysconfig/network/ifcfg-eth0"
+fi
+
+# Keep connman config ready for when we unmask it later
+mkdir -p "$ROOTFS_DIR/etc/connman"
+if ! grep -q '^AutoConnect' "$ROOTFS_DIR/etc/connman/main.conf" 2>/dev/null; then
+  cat >> "$ROOTFS_DIR/etc/connman/main.conf" <<'EOF'
+
+# pipa bring-up: avoid auto-DHCP stalls on gadget/ethernet
+[General]
+AutoConnect=false
+NetworkInterfaceBlacklist=usb0,rndis0,docker0,veth0,virbr0,ifb0
+EOF
+fi
+
+# KMS/eglfs for pipa panel (card1, not card0)
+install -Dm644 "$(dirname "$0")/../sparse/etc/eglfs-config.json" \
+  "$ROOTFS_DIR/etc/eglfs-config.json"
+install -Dm644 "$(dirname "$0")/../sparse/etc/mce/99-pipa-display.ini" \
+  "$ROOTFS_DIR/etc/mce/99-pipa-display.ini"
+
+# DSME required for Lipstick / timed / power management
+if [ -f "$ROOTFS_DIR/usr/lib/systemd/system/dsme.service" ]; then
+  ln -sfn /usr/lib/systemd/system/dsme.service \
+    "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants/dsme.service"
+fi
+
+# Device lock daemon (needs wheel group — openSUSE has no wheel by default)
+grep -q '^wheel:' "$ROOTFS_DIR/etc/group" || echo 'wheel:x:10:' >> "$ROOTFS_DIR/etc/group"
+if [ -f "$ROOTFS_DIR/usr/lib/systemd/system/nemo-devicelock.socket" ]; then
+  install -Dm644 "$(dirname "$0")/../sparse/usr/lib/systemd/system/nemo-devicelock.socket" \
+    "$ROOTFS_DIR/usr/lib/systemd/system/nemo-devicelock.socket"
+  ln -sfn /usr/lib/systemd/system/nemo-devicelock.socket \
+    "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants/nemo-devicelock.socket"
+  ln -sfn /usr/lib/systemd/system/nemo-devicelock.service \
+    "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants/nemo-devicelock.service"
+fi
+install -Dm644 "$(dirname "$0")/../sparse/etc/dbus-1/system.d/mce-lipstick-pipa.conf" \
+  "$ROOTFS_DIR/etc/dbus-1/system.d/mce-lipstick-pipa.conf"
+
+# Apps run on Lipstick's Wayland compositor; use software GL until MSM wayland-egl is fixed.
+install -Dm755 "$(dirname "$0")/../sparse/usr/bin/nemo-app-launch" \
+  "$ROOTFS_DIR/usr/bin/nemo-app-launch"
+install -Dm644 "$(dirname "$0")/../sparse/var/lib/environment/nemo/50-app-rendering.conf" \
+  "$ROOTFS_DIR/var/lib/environment/nemo/50-app-rendering.conf"
+mkdir -p "$ROOTFS_DIR/etc/systemd/system/user@.service.d"
+install -Dm644 "$(dirname "$0")/../sparse/etc/systemd/system/user@.service.d/local.conf" \
+  "$ROOTFS_DIR/etc/systemd/system/user@.service.d/local.conf"
+# Wrap all Glacier / fingerterm launchers for software Wayland GL
+for desk in "$ROOTFS_DIR"/usr/share/applications/fingerterm.desktop \
+            "$ROOTFS_DIR"/usr/share/applications/glacier-*.desktop; do
+  [ -f "$desk" ] || continue
+  grep -q 'nemo-app-launch' "$desk" && continue
+  sed -i 's|^Exec=\(.*\)|Exec=/usr/bin/nemo-app-launch \1|' "$desk"
+done
+# fingerterm historically uses bare binary name
+if [ -f "$ROOTFS_DIR/usr/share/applications/fingerterm.desktop" ]; then
+  sed -i 's|^Exec=.*|Exec=/usr/bin/nemo-app-launch fingerterm|' \
+    "$ROOTFS_DIR/usr/share/applications/fingerterm.desktop"
+fi
+
+# fingerterm Qt6: touchPoints signal injection removed — use touch area property
+if [ -f "$ROOTFS_DIR/usr/share/fingerterm/Main.qml" ]; then
+  sed -i 's/touchPoints\.forEach/multiTouchArea.touchPoints.forEach/g' \
+    "$ROOTFS_DIR/usr/share/fingerterm/Main.qml"
+fi
+
+# pipa-unblank runs before lipstick; wake display via mce before UI
+cat > "$ROOTFS_DIR/usr/lib/systemd/system/pipa-display-on.service" <<'EOF'
+[Unit]
+Description=Wake pipa panel via mce before Lipstick
+DefaultDependencies=no
+After=mce.service
+Before=nemo-devicelock.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c 'busctl call com.nokia.mce /com/nokia/mce/request com.nokia.mce.request req_display_state_on 2>/dev/null || true; busctl call com.nokia.mce /com/nokia/mce/request com.nokia.mce.request req_display_blanking_pause 2>/dev/null || true; for d in /sys/class/backlight/*; do echo 0 > "$d/bl_power" 2>/dev/null; echo $(($(cat "$d/max_brightness" 2>/dev/null || echo 255)*95/100)) > "$d/brightness" 2>/dev/null; done; true'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+mkdir -p "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants"
+ln -sfn /usr/lib/systemd/system/pipa-display-on.service \
+  "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants/pipa-display-on.service"
+
+# MCE with never-blank (do not mask — blanking breaks pipa panel)
+rm -f "$ROOTFS_DIR/etc/systemd/system/mce.service"
+if [ -f "$ROOTFS_DIR/usr/lib/systemd/system/mce.service" ]; then
+  ln -sfn /usr/lib/systemd/system/mce.service \
+    "$ROOTFS_DIR/etc/systemd/system/multi-user.target.wants/mce.service"
+fi
 
 # Autologin on tty1 is optional debug; keep getty but don't block graphical
 mkdir -p "$ROOTFS_DIR/etc/systemd/system/getty@tty1.service.d"
@@ -177,4 +321,4 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin root --noclear %I \$TERM
 EOF
 
-echo "Nemo user ${NEMO_USER}/${NEMO_PASS} ready; glacier-session.service enabled"
+echo "Nemo user ${NEMO_USER}/${NEMO_PASS} ready; glacier-session + usb-rndis enabled"

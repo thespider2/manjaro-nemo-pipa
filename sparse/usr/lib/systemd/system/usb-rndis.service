@@ -1,0 +1,17 @@
+[Unit]
+Description=USB RNDIS gadget (SSH over USB)
+DefaultDependencies=no
+After=local-fs.target systemd-modules-load.service
+Before=connman.service network-pre.target
+# /sys/class/udc exists even when empty; never gate on that directory alone.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=20
+ExecStart=/usr/bin/usb-rndis-gadget.sh
+SuccessExitStatus=0 1
+ExecStop=/bin/bash -c 'echo "" > /sys/kernel/config/usb_gadget/g1/UDC 2>/dev/null || true'
+
+[Install]
+WantedBy=multi-user.target

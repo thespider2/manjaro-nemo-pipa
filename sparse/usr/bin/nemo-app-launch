@@ -1,0 +1,24 @@
+#!/bin/bash
+# Launch Glacier apps under Lipstick with /var/lib/environment/nemo/*.conf applied.
+set -euo pipefail
+
+if [ $# -lt 1 ]; then
+  echo "Usage: nemo-app-launch <command> [args...]" >&2
+  exit 1
+fi
+
+for f in /var/lib/environment/nemo/*.conf; do
+  [ -f "$f" ] || continue
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|\#*) continue ;;
+      *=*) export "$line" ;;
+    esac
+  done < "$f"
+done
+
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+: "${WAYLAND_DISPLAY:=wayland-0}"
+export XDG_RUNTIME_DIR WAYLAND_DISPLAY
+
+exec "$@"

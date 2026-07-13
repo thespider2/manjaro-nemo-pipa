@@ -39,14 +39,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             e2fsprogs dosfstools rsync wget curl ca-certificates \
-            zip unzip cpio gzip xz-utils
+            zip unzip cpio gzip xz-utils rpm2cpio
 
-      - name: Build Nemo pipa flash layout
+      - name: Build full Nemo pipa flash layout
         run: |
           mkdir -p images
           chmod +x scripts/*.sh
-          # Privileged: loop mounts for esp/boot/rootfs
-          sudo ./scripts/ci-build-image.sh
+          # Full image: Glacier apps + HW + UI by default (PinePhone NEMO model)
+          export INJECT_FULL_PACKAGES=1
+          sudo -E ./scripts/ci-build-image.sh
           sudo chown -R "$USER:$USER" images || true
 
       - name: Upload flashable artifacts

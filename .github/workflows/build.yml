@@ -7,6 +7,7 @@ on:
     paths:
       - "profiles/**"
       - "scripts/**"
+      - "sparse/**"
       - "efi-template/**"
       - "assets/**"
       - "Dockerfile"
@@ -39,14 +40,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             e2fsprogs dosfstools rsync wget curl ca-certificates \
-            zip unzip cpio gzip xz-utils rpm2cpio
+            zip unzip cpio gzip xz-utils rpm2cpio git
 
       - name: Build full Nemo pipa flash layout
         run: |
           mkdir -p images
-          chmod +x scripts/*.sh
-          # Full image: Glacier apps + HW + UI by default (PinePhone NEMO model)
+          chmod +x scripts/*.sh sparse/usr/bin/* || true
+          # Full image: Glacier apps + HW + UI (PinePhone model)
+          # Also builds glacier-camera/music/browser from git; falls back to
+          # qcam / amberol / angelfish if builds fail.
           export INJECT_FULL_PACKAGES=1
+          export BUILD_GLACIER_EXTRA_APPS=1
           sudo -E ./scripts/ci-build-image.sh
           sudo chown -R "$USER:$USER" images || true
 
@@ -54,7 +58,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nemo-pipa-flashable
-          # Flashables only — do not also upload a zip of the same files (~2× size).
           path: |
             images/nemo_esp.raw.xz
             images/nemo_boot.raw.xz

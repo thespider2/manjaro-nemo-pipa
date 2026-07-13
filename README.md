@@ -26,7 +26,7 @@ CI artifacts are **xz-compressed**. `flash.sh` decompresses automatically.
 ## What a “full” pipa image includes (default)
 
 1. OBS `openSUSE-Tumbleweed-ARM-NEMO.aarch64-rootfs*.tar.xz` (same stack as PinePhone)
-2. **Full Glacier apps** injected from `devel:NemoMobile` (calc, files, gallery, clock, keyboard, …)
+2. **Full Glacier apps** from OBS + **git-built** `glacier-camera` / `glacier-music` / `glacier-browser` (with **angelfish** / **amberol** / **qcam** fallbacks)
 3. **PulseAudio + libssc deps** from openSUSE Tumbleweed ports
 4. **pipa-pkgs**: `linux-pipa`, firmware, UCM, sensors, Qualcomm helpers, libcamera/qcam
 5. Session like upstream JeOS `config.sh`: user `nemo`, linger, **Lipstick via user-session**, `graphical.target`

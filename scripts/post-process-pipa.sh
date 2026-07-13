@@ -135,6 +135,12 @@ if [[ "${INJECT_FULL_PACKAGES:-1}" == "1" ]]; then
     "$REPO_ROOT/scripts/inject-full-packages.sh"
 fi
 
+# Build glacier-camera / music / browser from git (not published on OBS)
+if [[ "${BUILD_GLACIER_EXTRA_APPS:-1}" == "1" ]]; then
+  ROOTFS_DIR="$ROOTFS_DIR" "$REPO_ROOT/scripts/build-glacier-extra-apps.sh" \
+    || echo "WARNING: glacier extra app build failed (fallbacks still installed)"
+fi
+
 # OBS rootfs has lipstick but no regular user / session enablement — fix that
 ROOTFS_DIR="$ROOTFS_DIR" "$REPO_ROOT/scripts/configure-nemo-session.sh"
 ROOTFS_DIR="$ROOTFS_DIR" "$REPO_ROOT/scripts/configure-pipa-hardware.sh"

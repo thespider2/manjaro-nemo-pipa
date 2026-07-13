@@ -71,9 +71,13 @@ fi
 mkdir -p "$ROOTFS_DIR/var/lib/environment/nemo"
 printf 'QT_IM_MODULE=Maliit\n' > "$ROOTFS_DIR/var/lib/environment/nemo/60-pipa-im.conf"
 
-# Camera launcher (qcam from libcamera-tools) + dma_heap access
-install -Dm644 "$(dirname "$0")/../sparse/usr/share/applications/glacier-camera.desktop" \
-  "$ROOTFS_DIR/usr/share/applications/glacier-camera.desktop" 2>/dev/null || true
+# Camera / Browser / Music launchers (Glacier or openSUSE fallbacks)
+install -Dm755 "$(dirname "$0")/../sparse/usr/bin/nemo-app-fallback" \
+  "$ROOTFS_DIR/usr/bin/nemo-app-fallback" 2>/dev/null || true
+for desk in glacier-camera glacier-browser glacier-music; do
+  install -Dm644 "$(dirname "$0")/../sparse/usr/share/applications/${desk}.desktop" \
+    "$ROOTFS_DIR/usr/share/applications/${desk}.desktop" 2>/dev/null || true
+done
 install -Dm644 "$(dirname "$0")/../sparse/etc/udev/rules.d/50-pipa-dmaheap.rules" \
   "$ROOTFS_DIR/etc/udev/rules.d/50-pipa-dmaheap.rules" 2>/dev/null || true
 install -Dm644 "$(dirname "$0")/../sparse/etc/udev/rules.d/55-pipa-rtc.rules" \

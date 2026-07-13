@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Music
+Comment=Music player
+Exec=/usr/bin/nemo-app-fallback music
+Icon=multimedia-audio-player
+Categories=AudioVideo;Audio;Player;
+X-Nemo-Application-Type=no-boost

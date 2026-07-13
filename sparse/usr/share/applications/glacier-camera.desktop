@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Camera
+Comment=Camera
+Exec=/usr/bin/nemo-app-fallback camera
+Icon=camera-photo
+Categories=AudioVideo;Photography;
+X-Nemo-Application-Type=no-boost

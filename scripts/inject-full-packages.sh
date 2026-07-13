@@ -110,6 +110,15 @@ TW_PKGS=(
   libtiff6
   libSDL2-2_0-0
   rtkit
+  # Fallbacks when glacier-browser / glacier-music are not built yet
+  angelfish
+  amberol
+  libQt6Multimedia6
+  libQt6MultimediaQuick6
+  libQt6WebEngineCore6
+  libQt6WebEngineQuick6
+  qt6-webengine-imports
+  qt6-multimedia-imports
 )
 
 for pkg in "${TW_PKGS[@]}"; do

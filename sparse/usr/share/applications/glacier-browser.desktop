@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Browser
+Comment=Web browser
+Exec=/usr/bin/nemo-app-fallback browser
+Icon=internet-web-browser
+Categories=Network;WebBrowser;
+X-Nemo-Application-Type=no-boost

@@ -23,8 +23,16 @@ glacier-calc
 glacier-filemuncher
 glacier-gallery
 glacier-gallery-qmlplugin
+# Built from git in CI (not on OBS yet):
+glacier-camera
+glacier-music
+glacier-browser
 mapplauncherd
 mapplauncherd-qt6
 nemo-qml-plugin-alarms-qt6
 nemo-qml-plugin-contacts-qt6
 qtcontacts-sqlite-qt6
+
+# Fallbacks if git builds fail
+angelfish
+amberol
